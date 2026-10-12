@@ -1,0 +1,10 @@
+suppressPackageStartupMessages({
+  library(MASS)
+  library(knitr)
+  library(viridis)
+  library(dplyr)
+  library(mnormt)
+  library(ggplot2)
+  library(plotly)
+  library(vembedr)
+})

@@ -1,0 +1,2257 @@
+---
+title: "Logistic credit scoring"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+execute:
+  echo: true
+  cache: false
+  error: false
+  warning: false
+  message: false
+---
+
+Computational companion. Run from the project root in source order. Each result
+uses the preceding calculations in this chapter. Book numbering follows the
+11 October 2026 review version. The chapter README contains the result index.
+
+```{r companion-setup}
+source("shared/output.R")
+companion_setup("01-logistic")
+```
+
+## 1.1 The credit scoring problem
+
+```{r step-001}
+# Each chapter is run in a fresh R process by run.R.
+```
+
+```{r step-002}
+# Logistic models
+library(ggplot2)
+library(tidyr) # gather()
+library(dplyr)
+library(pROC) # roc
+source("shared/formatting.R")
+source("shared/figure-theme.R")
+```
+
+```{r step-003}
+source("chapters/01-logistic/helpers/packages.R")
+source("shared/figure-theme.R")
+```
+
+## 1.2 Data exploration and cleaning
+
+```{r step-004}
+dat <- readRDS("data/credit-scoring/credit_scoring.rds")
+initial_n <- nrow(dat)
+initial_p <- ncol(dat)
+str(dat)
+```
+
+```{r step-005}
+old_names <- colnames(dat)
+colnames(dat) <- c("loan_st", "l_amnt", "int", "grade", "emp_len", 
+                   "home", "income", "age", "sex", "region")
+```
+
+### Table 1.1 {#result-table-1-1}
+
+```{r table-1-1}
+companion_kable(
+  data.frame(
+    `Original name` = paste0("`", old_names, "`"),
+    `Book name` = paste0("`", colnames(dat), "`")
+  ),
+  caption = "Variable names used in the chapter.",
+  col.names = c("Original name", "Book name"),
+  row.names = FALSE
+)
+```
+
+```{r step-007}
+first_records <- head(dat, 10)
+```
+
+### Table 1.2 {#result-table-1-2}
+
+```{r table-1-2}
+companion_kable(
+  transform(first_records,
+    l_amnt = fmt_num(l_amnt, 0), income = fmt_num(income, 0),
+    int = fmt_num(int, 2), emp_len = fmt_num(emp_len, 2),
+    home = unname(c(MORTGAGE = "M", OWN = "O", RENT = "R")[as.character(home)])),
+  col.names = c("Default", "Loan", "Rate (%)", "Grade", "Tenure",
+                "Home", "Income", "Age", "Sex", "Region"),
+  caption = "First 10 loan records before cleaning.",
+  row.names = FALSE
+)
+```
+
+```{r step-009}
+home_counts <- dat |>
+  count(home, name = "loans") |>
+  mutate(sample_share = loans / sum(loans))
+```
+
+### Table 1.3 {#result-table-1-3}
+
+```{r table-1-3}
+home_counts |>
+  mutate(loans = fmt_int(loans), sample_share = fmt_pct(sample_share, 2)) |>
+  companion_kable(col.names = c("Home ownership", "Loans", "Share of sample"),
+               caption = "Loan counts by home ownership.", row.names = FALSE)
+```
+
+```{r step-011}
+home_default_summary <- dat |>
+  mutate(default = as.numeric(as.character(loan_st))) |>
+  group_by(home) |>
+  summarize(
+    loans = n(),
+    defaults = sum(default == 1),
+    default_rate = mean(default == 1),
+    .groups = "drop"
+  )
+```
+
+### Table 1.4 {#result-table-1-4}
+
+```{r table-1-4}
+home_default_summary |>
+  mutate(non_defaults = loans - defaults) |>
+  select(home, loans, non_defaults, defaults, default_rate) |>
+  mutate(across(c(loans, non_defaults, defaults), fmt_int),
+         default_rate = fmt_pct(default_rate, 2)) |>
+  companion_kable(
+    col.names = c("Home ownership", "Loans", "No default", "Default", "Default rate"),
+    caption = "Default rate by home-ownership category.",
+    row.names = FALSE
+  )
+```
+
+```{r step-013}
+interest_quantiles <- quantile(dat$int, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+
+interest_histogram <- ggplot(dat, aes(x = int)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 0.5, colour = "black",
+                 fill = "white", linewidth = 0.3) +
+  labs(y = "Density", x = "Interest rate (%)")
+```
+
+### Figure 1.1 {#result-figure-1-1}
+
+```{r figure-1-1}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.1. Interest rate histogram."
+interest_histogram + book_figure_theme()
+```
+
+### Screening implausible records
+
+```{r step-015}
+income_dotplot <- ggplot(dat, aes(income)) +
+  geom_dotplot(binwidth = 100000, stackratio = 0.001,
+               fill = book_plot_colors[["primary"]], colour = book_plot_colors[["primary"]]) +
+  labs(y = "", x = "Annual income ($)")
+```
+
+### Figure 1.2 {#result-figure-1-2}
+
+```{r figure-1-2}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.2. Annual income dotplot."
+income_dotplot +
+  scale_x_continuous(labels = scales::label_comma()) +
+  scale_y_continuous(breaks = NULL) +
+  book_figure_theme()
+```
+
+```{r step-017}
+high_income <- dat[(dat$income > 1000000), ]
+high_income
+```
+
+```{r step-018}
+dat <- dat[dat$income <= 1000000, ]
+income_filtered_n <- nrow(dat)
+```
+
+```{r step-019}
+cleaned_income_dotplot <- ggplot(dat, aes(income)) +
+  geom_dotplot(binwidth = 10000, stackratio = 0.01,
+               fill = book_plot_colors[["primary"]], colour = book_plot_colors[["primary"]]) +
+  labs(y = "", x = "Annual income ($)")
+```
+
+### Figure 1.3 {#result-figure-1-3}
+
+```{r figure-1-3}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.3. Annual income without extreme values."
+cleaned_income_dotplot +
+  scale_x_continuous(labels = scales::label_comma()) +
+  scale_y_continuous(breaks = NULL) +
+  book_figure_theme()
+```
+
+```{r step-021}
+incompatible_employment <- dat[dat$emp_len > dat$age - 16, ]
+incompatible_employment[, c("age", "emp_len")]
+employment_example <- incompatible_employment[1, ]
+```
+
+```{r step-022}
+dat <- dat[dat$emp_len <= dat$age - 16, ]
+clean_n <- nrow(dat)
+c(input = initial_n, excluded_income = nrow(high_income),
+  excluded_employment = nrow(incompatible_employment), retained = clean_n)
+```
+
+```{r step-023}
+summary_table <- dat |>
+  group_by(sex) |>
+  summarize(
+    Mean = mean(income),
+    Median = median(income),
+    Min = min(income),
+    Max = max(income),
+    Count = n()
+  ) |>
+  mutate(
+    Gender = case_when(
+      sex == 0 ~ "Male",
+      sex == 1 ~ "Female"
+    )
+ )
+  
+summary_table
+```
+
+```{r step-024}
+source("chapters/01-logistic/helpers/data.R")
+source("shared/figure-theme.R")
+```
+
+## 1.3 Logistic regression models
+
+```{r step-025}
+# Set loan status as a factor.
+dat$loan_st <- as.factor(dat$loan_st)
+set.seed(569)
+random_order <- order(runif(nrow(dat)))
+index_train <- random_order[seq_len(floor(2 * nrow(dat) / 3))]
+index_test <- random_order[-seq_along(index_train)]
+# Create training set
+train <- dat[index_train, ]
+# Create test set
+test <- dat[index_test, ]
+```
+
+```{r step-026}
+# Combine data into a list for processing
+data_list <- list(dat = dat$loan_st, train = train$loan_st, test = test$loan_st)
+
+# Compute proportions and combine into a data frame
+prop <- do.call(rbind, lapply(data_list, function(x) prop.table(table(x))))
+colnames(prop) <- c("no defaults", "defaults")
+row.names(prop) <- c("dat_prop", "train_prop", "test_prop")
+prop
+```
+
+### An age-only benchmark
+
+```{r step-027}
+# Fitting a simple logistic model.
+logi_age <- glm(loan_st ~ age, family = "binomial", data = train)
+logi_age
+```
+
+```{r step-028}
+age_example_18 <- 18
+age_example_60 <- 60
+beta_age_0 <- unname(coef(logi_age)[["(Intercept)"]])
+beta_age_1 <- unname(coef(logi_age)[["age"]])
+age_logit_18 <- beta_age_0 + beta_age_1 * age_example_18
+age_exp_18 <- exp(age_logit_18)
+age_pd_18 <- age_exp_18 / (1 + age_exp_18)
+age_logit_60 <- beta_age_0 + beta_age_1 * age_example_60
+age_exp_60 <- exp(age_logit_60)
+age_pd_60 <- age_exp_60 / (1 + age_exp_60)
+age_min_train <- min(train$age, na.rm = TRUE)
+age_max_train <- max(train$age, na.rm = TRUE)
+age_logit_min_train <- beta_age_0 + beta_age_1 * age_min_train
+age_logit_max_train <- beta_age_0 + beta_age_1 * age_max_train
+age_pd_min_train <- exp(age_logit_min_train) / (1 + exp(age_logit_min_train))
+age_pd_max_train <- exp(age_logit_max_train) / (1 + exp(age_logit_max_train))
+age_pd_observed_low <- min(age_pd_min_train, age_pd_max_train)
+age_pd_observed_high <- max(age_pd_min_train, age_pd_max_train)
+age_pd_observed_width <- age_pd_observed_high - age_pd_observed_low
+aic_age <- AIC(logi_age)
+```
+
+```{r step-029}
+# Define the function for the logistic regression model
+logistic_function <- function(age) {
+  beta0 <- beta_age_0
+  beta1 <- beta_age_1
+  p <- exp(beta0 + beta1 * age) / (1 + exp(beta0 + beta1 * age))
+  return(p)
+}
+
+# Generate a sequence of ages
+ages <- seq(-1000, 500, by = 1)
+
+# Apply the logistic function to each age
+p_values <- sapply(ages, logistic_function)
+
+age_curve <- ggplot(data.frame(age = ages, p = p_values),
+                    aes(x = age, y = p)) +
+  geom_line(color = book_plot_colors[["age"]], linewidth = 0.8) +
+  labs(x = "Age", y = "Age-model predicted default probability")
+```
+
+### Figure 1.4 {#result-figure-1-4}
+
+```{r figure-1-4}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.4. Sigmoid curve or logistic curve: age model."
+age_indicator_data <- data.frame(
+  age = c(age_min_train, age_max_train),
+  p = c(age_pd_min_train, age_pd_max_train),
+  label_x = c(age_min_train + 80, age_max_train + 240),
+  label_y = c(
+    min(age_pd_min_train + 0.14, 0.95),
+    min(age_pd_max_train + 0.36, 0.95)
+  ),
+  label = c(
+    paste0("min age = ", fmt_num(age_min_train, 0), "\np = ", fmt_pct(age_pd_min_train, 2)),
+    paste0("max age = ", fmt_num(age_max_train, 0), "\np = ", fmt_pct(age_pd_max_train, 2))
+  )
+)
+
+age_curve +
+  geom_segment(
+    data = age_indicator_data,
+    aes(x = age, xend = age, y = 0, yend = p),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    color = book_plot_colors[["risk"]]
+  ) +
+  geom_segment(
+    data = age_indicator_data,
+    aes(x = min(ages), xend = age, y = p, yend = p),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    color = book_plot_colors[["risk"]]
+  ) +
+  geom_segment(
+    data = age_indicator_data,
+    aes(x = age, xend = label_x, y = p, yend = label_y),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    color = book_plot_colors[["risk"]]
+  ) +
+  geom_point(
+    data = age_indicator_data,
+    aes(x = age, y = p),
+    inherit.aes = FALSE,
+    color = book_plot_colors[["risk"]],
+    size = 2.2
+  ) +
+  geom_label(
+    data = age_indicator_data,
+    aes(x = label_x, y = label_y, label = label),
+    inherit.aes = FALSE,
+    size = 3.2,
+    fill = "white",
+    color = book_plot_colors[["risk"]],
+    linewidth = 0
+  ) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme()
+```
+
+```{r step-031}
+# Build a glm model with variable interest rate as a predictor.
+logi_int <- glm(formula = loan_st ~ int, family = "binomial", data = train)
+# Print the parameter estimates.
+logi_int
+```
+
+```{r step-032}
+aic_int <- AIC(logi_int)
+```
+
+### Adding borrower and loan characteristics
+
+```{r step-033}
+# Multiple variables in a logistic regression model.
+logi_multi <- glm(loan_st ~ age + int + grade + log(l_amnt) + 
+                  log(income) , family = "binomial", data = train)
+# Obtain significance levels using summary().
+summary(logi_multi)
+```
+
+```{r step-034}
+aic_multi <- AIC(logi_multi)
+```
+
+### Interpreting coefficients and odds ratios
+
+```{r step-035}
+multi_summary <- summary(logi_multi)$coefficients
+multi_beta <- multi_summary[, "Estimate"]
+multi_se <- multi_summary[, "Std. Error"]
+
+odds_ratios <- data.frame(
+  term = rownames(multi_summary),
+  coefficient = multi_beta,
+  std_error = multi_se,
+  z_value = multi_summary[, "z value"],
+  p_value = multi_summary[, "Pr(>|z|)"],
+  OR = exp(multi_beta),
+  OR_low_95 = exp(multi_beta - 1.96 * multi_se),
+  OR_high_95 = exp(multi_beta + 1.96 * multi_se)
+)
+rownames(odds_ratios) <- odds_ratios$term
+odds_ratios$reading <- ifelse(
+  odds_ratios$p_value < 0.05 & odds_ratios$OR_low_95 > 1,
+  "clear increase in odds",
+  ifelse(
+    odds_ratios$p_value < 0.05 & odds_ratios$OR_high_95 < 1,
+    "clear decrease in odds",
+    "unclear at 5%"
+  )
+)
+```
+
+### Table 1.5 {#result-table-1-5}
+
+```{r table-1-5}
+grade_terms <- grep("^grade", rownames(odds_ratios), value = TRUE)
+grade_significant_terms <- grade_terms[
+  odds_ratios[grade_terms, "p_value"] < 0.05
+]
+grade_significant_labels <- sub("^grade", "", grade_significant_terms)
+grade_reference <- if (is.factor(train$grade)) {
+  levels(train$grade)[1]
+} else {
+  sort(unique(train$grade))[1]
+}
+grade_significant_text <- if (length(grade_significant_labels) > 0) {
+  paste(grade_significant_labels, collapse = ", ")
+} else {
+  "none at this threshold"
+}
+
+grade_first_term <- if ("gradeB" %in% grade_terms) "gradeB" else grade_terms[1]
+grade_first_label <- sub("^grade", "", grade_first_term)
+grade_highest_term <- grade_terms[which.max(odds_ratios[grade_terms, "OR"])]
+grade_highest_label <- sub("^grade", "", grade_highest_term)
+grade_or_increases <- all(diff(odds_ratios[grade_terms, "OR"]) > 0)
+
+odds_ratio_table <- odds_ratios[odds_ratios$term != "(Intercept)", ]
+odds_ratio_table <- data.frame(
+  Term = odds_ratio_table$term,
+  Coefficient = fmt_num(odds_ratio_table$coefficient, 4),
+  `Odds ratio` = fmt_num(odds_ratio_table$OR, 4),
+  `95% OR interval` = paste0(
+    "[",
+    fmt_num(odds_ratio_table$OR_low_95, 4),
+    ", ",
+    fmt_num(odds_ratio_table$OR_high_95, 4),
+    "]"
+  ),
+  `p-value` = format.pval(odds_ratio_table$p_value, digits = 3, eps = 0.001),
+  Reading = odds_ratio_table$reading,
+  check.names = FALSE
+)
+
+companion_kable(
+  odds_ratio_table,
+  caption = "Coefficient and odds-ratio interpretation for `logi_multi`.",
+  row.names = FALSE
+)
+```
+
+```{r step-037}
+income_change_factor <- 1.10
+income_log_coefficient <- unname(coef(logi_multi)["log(income)"])
+income_odds_multiplier <- exp(
+  income_log_coefficient * log(income_change_factor)
+)
+income_odds_multiplier
+```
+
+```{r step-038}
+# Logistic regression model using all available predictors in the data set.
+logi_full <- glm(loan_st ~ age + int + grade + log(l_amnt) +
+                   log(income) + emp_len + home + sex +
+                   region, family = "binomial", data = train)
+
+aic_full <- AIC(logi_full)
+```
+
+### Table 1.6 {#result-table-1-6}
+
+```{r table-1-6}
+data.frame(
+  model = c("logi_age", "logi_int", "logi_multi", "logi_full"),
+  AIC = c(aic_age, aic_int, aic_multi, aic_full)
+) |>
+  mutate(AIC = fmt_num(AIC, 1)) |>
+  companion_kable(
+    caption = "AIC comparison across logistic model candidates.",
+    row.names = FALSE
+  )
+```
+
+```{r step-040}
+source("chapters/01-logistic/helpers/models.R")
+source("shared/figure-theme.R")
+```
+
+## 1.4 Predicted probabilities and cutoff rules
+
+```{r step-041}
+# Locate the same applicant by the original file row.
+john_doe_index <- match("6", rownames(test))
+John_Doe <- as.data.frame(test[john_doe_index, ])
+John_Doe
+```
+
+```{r step-042}
+# List of models
+models <- list("logi_age" = logi_age, "logi_int" = logi_int, "logi_multi" = logi_multi)
+
+# Estimate the default probability for John Doe using all models
+pred_John <- sapply(models, predict, newdata = John_Doe, type = "response")
+
+# Convert to a table with appropriate column name
+pred_John <- as.data.frame(pred_John)
+colnames(pred_John) <- "Predicted default probability for John Doe."
+
+# Display the predictions
+pred_John
+```
+
+### Comparing predicted probability distributions
+
+```{r step-043}
+# Estimate default probabilities with the three baseline models.
+pred_logi_age <- predict(logi_age, newdata = test, type = "response")
+pred_logi_int <- predict(logi_int, newdata = test, type = "response")
+pred_logi_multi <- predict(logi_multi, newdata = test,
+                           type = "response")
+
+pred_range <- rbind("logi_age" = range(pred_logi_age),
+                     "logi_int" = range(pred_logi_int),
+                     "logi_multi" = range(pred_logi_multi))
+aic <- rbind(logi_age$aic, logi_int$aic, logi_multi$aic)
+pred_range <- cbind(pred_range, aic)
+colnames(pred_range) <- c("min(predicted PD)", "max(predicted PD)", "AIC")
+pred_range
+```
+
+```{r step-044}
+# Convert the predictions to a data frame
+pred_data <- data.frame(
+  Observation = seq_along(pred_logi_age),  # Sequence for observation index
+  Predicted_Probabilities = pred_logi_age
+)
+
+# Create the plot
+age_scatter <- ggplot(pred_data, aes(x = Observation, y = Predicted_Probabilities)) +
+  geom_point(alpha = 0.35, color = book_plot_colors[["age"]], size = 0.7) +
+  labs(x = "Observation (test set)", 
+       y = "Age-only model predicted default probability")
+```
+
+### Figure 1.5 {#result-figure-1-5}
+
+```{r figure-1-5}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.5. Predicted PDs from the age-only model across the test set."
+age_scatter +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme()
+```
+
+```{r step-046}
+age_density <- ggplot(data.frame(pred_logi_age), aes(x = pred_logi_age)) +
+  geom_density(fill = book_plot_colors[["age"]], alpha = 0.4, linewidth = 0.5) +
+  labs(y = "Density", x = "Predicted default probability")
+```
+
+### Figure 1.6 {#result-figure-1-6}
+
+```{r figure-1-6}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.6. Narrow distribution of age-only predicted PDs."
+age_density +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme()
+```
+
+```{r step-048}
+pred_logi <- data.frame(cbind(pred_logi_age, pred_logi_int,
+                                  pred_logi_multi))
+pred_logi <- gather(pred_logi, key = "model",  value = "pred")
+```
+
+```{r step-049}
+baseline_density <- ggplot(pred_logi[pred_logi$model != "pred_logi_age",],
+       aes(x = pred, fill = model)) +
+  geom_density(alpha = 0.4, linewidth = 0.5) +
+  labs(y = "Density", x = "Predicted default probability")
+```
+
+### Figure 1.7 {#result-figure-1-7}
+
+```{r figure-1-7}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.7. Prediction distributions for the interest-rate and multi-factor models."
+baseline_density +
+  scale_fill_manual(values = book_prediction_colors, labels = book_prediction_labels) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme()
+```
+
+```{r step-051}
+baseline_boxplot <- ggplot(pred_logi, aes(x = pred, y = model, fill = model)) +
+  geom_boxplot(linewidth = 0.5, outlier.size = 0.7) +
+  labs(y = "Model", x = "Predicted default probability")
+```
+
+### Figure 1.8 {#result-figure-1-8}
+
+```{r figure-1-8}
+#| fig-width: 5.5
+#| fig-height: 3.2
+#| fig-cap: "Figure 1.8. Prediction ranges across age, interest-rate, and multi-factor models."
+baseline_boxplot +
+  scale_fill_manual(values = book_prediction_colors) +
+  scale_y_discrete(labels = book_prediction_labels) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme() + theme(legend.position = "none")
+```
+
+### From the full-model score to a default probability
+
+```{r step-053}
+# Loan status predictions for all test set elements.
+pred_logi_full <- predict(logi_full, newdata = test, type = "response")
+range(pred_logi_full)
+```
+
+```{r step-054}
+full_score_test <- as.numeric(predict(logi_full, newdata = test, type = "link"))
+full_score_min_test <- min(full_score_test, na.rm = TRUE)
+full_score_max_test <- max(full_score_test, na.rm = TRUE)
+full_pd_min_test <- plogis(full_score_min_test)
+full_pd_max_test <- plogis(full_score_max_test)
+full_pd_range_test <- full_pd_max_test - full_pd_min_test
+full_score_max_exp <- exp(full_score_max_test)
+
+full_score_axis_min <- floor(min(full_score_min_test, -8))
+full_score_axis_max <- ceiling(max(full_score_max_test, 8))
+full_score_curve <- seq(full_score_axis_min, full_score_axis_max, length.out = 1000)
+full_score_curve_data <- data.frame(
+  score = full_score_curve,
+  p = plogis(full_score_curve)
+)
+
+full_score_plot <- ggplot(full_score_curve_data, aes(x = score, y = p)) +
+  geom_line(color = book_plot_colors[["primary"]], linewidth = 0.8) +
+  labs(x = "Full-model score (logit)",
+       y = "Full-model predicted default probability")
+```
+
+```{r step-055}
+full_score_width <- full_score_axis_max - full_score_axis_min
+full_score_indicator_data <- data.frame(
+  score = c(full_score_min_test, full_score_max_test),
+  p = c(full_pd_min_test, full_pd_max_test),
+  label_x = c(
+    full_score_axis_min + 0.20 * full_score_width,
+    full_score_axis_min + 0.80 * full_score_width
+  ),
+  label_y = c(
+    0.30,
+    0.55
+  ),
+  label = c(
+    paste0("min score = ", fmt_num(full_score_min_test, 2), "\np = ", fmt_pct(full_pd_min_test, 2)),
+    paste0("max score = ", fmt_num(full_score_max_test, 2), "\np = ", fmt_pct(full_pd_max_test, 2))
+  )
+)
+```
+
+### Figure 1.9 {#result-figure-1-9}
+
+```{r figure-1-9}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.9. Sigmoid curve or logistic curve: full-model score."
+full_score_plot +
+  geom_segment(
+    data = full_score_indicator_data,
+    aes(x = score, xend = score, y = 0, yend = p),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    color = book_plot_colors[["risk"]]
+  ) +
+  geom_segment(
+    data = full_score_indicator_data,
+    aes(x = full_score_axis_min, xend = score, y = p, yend = p),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    color = book_plot_colors[["risk"]]
+  ) +
+  geom_segment(
+    data = full_score_indicator_data,
+    aes(x = score, xend = label_x, y = p, yend = label_y),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    color = book_plot_colors[["risk"]]
+  ) +
+  geom_point(
+    data = full_score_indicator_data,
+    aes(x = score, y = p),
+    inherit.aes = FALSE,
+    color = book_plot_colors[["risk"]],
+    size = 2.2
+  ) +
+  geom_label(
+    data = full_score_indicator_data,
+    aes(x = label_x, y = label_y, label = label),
+    inherit.aes = FALSE,
+    size = 3.2,
+    fill = "white",
+    color = book_plot_colors[["risk"]],
+    linewidth = 0
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.25),
+    labels = scales::label_percent(accuracy = 1)
+  ) +
+  book_figure_theme()
+```
+
+```{r step-057}
+pred_range <- rbind("logi_age" = range(pred_logi_age), 
+                     "logi_int" = range(pred_logi_int),
+                     "logi_multi" = range(pred_logi_multi),
+                     "logi_full" = range(pred_logi_full))
+aic <- rbind(logi_age$aic, logi_int$aic, logi_multi$aic, logi_full$aic)
+pred_range <- cbind(pred_range, aic)
+colnames(pred_range) <- c("min(predicted PD)", "max(predicted PD)", "AIC")
+```
+
+### Table 1.7 {#result-table-1-7}
+
+```{r table-1-7}
+pred_range_table <- data.frame(
+  Model = rownames(pred_range),
+  `Minimum predicted PD` = fmt_pct(pred_range[, "min(predicted PD)"], 2),
+  `Maximum predicted PD` = fmt_pct(pred_range[, "max(predicted PD)"], 2),
+  AIC = fmt_num(pred_range[, "AIC"], 1),
+  row.names = NULL
+)
+
+companion_kable(
+  pred_range_table,
+  caption = "Prediction ranges and AIC across logistic model candidates.",
+  row.names = FALSE
+)
+```
+
+```{r step-059}
+pred_logi <- data.frame(cbind(pred_logi_age, pred_logi_int,
+                                  pred_logi_multi, pred_logi_full))
+pred_logi <- gather(pred_logi, key = "model",  value = "pred")
+```
+
+```{r step-060}
+full_density_comparison <- ggplot(pred_logi[pred_logi$model != "pred_logi_age" &
+                  pred_logi$model != "pred_logi_int" ,],
+       aes(x = pred, fill = model)) +
+  geom_density(alpha = 0.4, linewidth = 0.5) +
+  labs(y = "Density", x = "Predicted default probability")
+```
+
+### Figure 1.10 {#result-figure-1-10}
+
+```{r figure-1-10}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.10. Prediction distributions for the multi-factor and full models."
+full_density_comparison +
+  scale_fill_manual(values = book_prediction_colors, labels = book_prediction_labels) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme()
+```
+
+```{r step-062}
+all_models_boxplot <- ggplot(pred_logi, aes(x = pred, y = model, fill = model)) +
+  geom_boxplot(linewidth = 0.5, outlier.size = 0.7) +
+  labs(y = "Model", x = "Predicted default probability")
+```
+
+### Figure 1.11 {#result-figure-1-11}
+
+```{r figure-1-11}
+#| fig-width: 5.5
+#| fig-height: 3.2
+#| fig-cap: "Figure 1.11. Prediction ranges across all logistic model candidates."
+all_models_boxplot +
+  scale_fill_manual(values = book_prediction_colors) +
+  scale_y_discrete(labels = book_prediction_labels) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme() + theme(legend.position = "none")
+```
+
+### From predicted probabilities to lending decisions
+
+```{r step-064}
+# Convert the predictions to a data frame
+cutoff_15 <- 0.15
+cutoff_15_below <- mean(pred_logi_full <= cutoff_15)
+cutoff_15_above <- mean(pred_logi_full > cutoff_15)
+
+pred_data <- data.frame(
+  Observation = seq_along(pred_logi_full),  # Sequence for observation index
+  Predicted_Probabilities = pred_logi_full
+)
+
+cutoff_scatter <- ggplot(
+  pred_data, aes(x = Observation, y = Predicted_Probabilities)
+) +
+  geom_point(alpha = 0.35, color = book_plot_colors[["primary"]], size = 0.7) +
+  geom_hline(yintercept = cutoff_15, color = book_plot_colors[["risk"]],
+              linetype = "dashed", linewidth = 0.35) +
+  labs(x = "Observation (test set)",
+       y = "Full-model predicted default probability")
+```
+
+### Figure 1.12 {#result-figure-1-12}
+
+```{r figure-1-12}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.12. Full-model predicted PDs with a 15% cutoff."
+cutoff_15_scatter_labels <- data.frame(
+  x = length(pred_logi_full) * 0.72,
+  y = c(cutoff_15 * 0.48,
+        cutoff_15 + 0.68 * (max(pred_logi_full) - cutoff_15)),
+  label = c(
+    paste0("Accepted\n", fmt_pct(cutoff_15_below, 1)),
+    paste0("Rejected\n", fmt_pct(cutoff_15_above, 1))
+  )
+)
+
+cutoff_scatter +
+  geom_label(
+    data = cutoff_15_scatter_labels,
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    fill = "white",
+    linewidth = 0,
+    size = 3.2,
+    lineheight = 0.95
+  ) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme()
+```
+
+```{r step-066}
+full_pred_density <- density(pred_logi_full)
+cutoff_density <- ggplot(
+  pred_logi[pred_logi$model == "pred_logi_full", ], aes(x = pred, fill = model)
+) +
+  geom_density(alpha = 0.4, linewidth = 0.5) +
+  geom_vline(xintercept = cutoff_15, linetype = "dashed",
+             color = book_plot_colors[["risk"]], linewidth = 0.55) +
+  labs(y = "Density", x = "Predicted default probability")
+```
+
+### Figure 1.13 {#result-figure-1-13}
+
+```{r figure-1-13}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.13. Full-model prediction distribution with a 15% cutoff."
+cutoff_15_density_labels <- data.frame(
+  x = c(cutoff_15 * 0.55,
+        cutoff_15 + 0.48 * (max(pred_logi_full) - cutoff_15)),
+  y = max(full_pred_density$y) * 1.18,
+  label = c(
+    paste0("Accepted\n", fmt_pct(cutoff_15_below, 1)),
+    paste0("Rejected\n", fmt_pct(cutoff_15_above, 1))
+  )
+)
+
+cutoff_density +
+  scale_fill_manual(values = book_prediction_colors) +
+  expand_limits(y = max(full_pred_density$y) * 1.35) +
+  geom_label(
+    data = cutoff_15_density_labels,
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    fill = "white",
+    linewidth = 0,
+    size = 3.2,
+    lineheight = 0.95
+  ) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme() + theme(legend.position = "none")
+```
+
+```{r step-068}
+# Make a binary predictions-vector using a cutoff of 15%
+pred_cutoff_15 <- ifelse(pred_logi_full > 0.15, 1, 0)
+cutoff_15_sample <- data.frame(
+  `Predicted PD` = fmt_pct(head(pred_logi_full), 2),
+  `Binary prediction` = head(pred_cutoff_15),
+  `Credit decision` = ifelse(head(pred_cutoff_15) == 1, "Reject", "Accept")
+)
+```
+
+### Table 1.8 {#result-table-1-8}
+
+```{r table-1-8}
+companion_kable(
+  cutoff_15_sample,
+  caption = "First six full-model predictions after applying the 15% cutoff.",
+  row.names = FALSE
+)
+```
+
+```{r step-070}
+# These consecutive positions illustrate all four credit consequences.
+case_rows <- 4501:4510
+observed_status <- as.numeric(as.character(test$loan_st))
+cutoff_15_observed_sample <- observed_status[case_rows]
+cutoff_15_prediction_sample <- pred_cutoff_15[case_rows]
+cutoff_15_case_sample <- data.frame(
+  `Application row` = rownames(test)[case_rows],
+  `Predicted PD` = fmt_pct(pred_logi_full[case_rows], 2),
+  `Binary prediction` = cutoff_15_prediction_sample,
+  `Credit decision` = ifelse(cutoff_15_prediction_sample == 1, "Reject", "Accept"),
+  `Observed outcome` = ifelse(cutoff_15_observed_sample == 1, "Default", "No default"),
+  `Credit outcome` = ifelse(
+    cutoff_15_prediction_sample == 0 & cutoff_15_observed_sample == 0,
+    "Good loan accepted",
+    ifelse(
+      cutoff_15_prediction_sample == 0 & cutoff_15_observed_sample == 1,
+      "Defaulting borrower accepted",
+      ifelse(
+        cutoff_15_prediction_sample == 1 & cutoff_15_observed_sample == 1,
+        "Default avoided",
+        "Good applicant rejected"
+      )
+    )
+  ),
+  check.names = FALSE
+)
+```
+
+### Table 1.9 {#result-table-1-9}
+
+```{r table-1-9}
+companion_kable(
+  cutoff_15_case_sample,
+  col.names = c("File row", "Predicted PD", "Predicted class", "Decision",
+                "Observed outcome", "Credit consequence"),
+  caption = "Ten test-set cases comparing predicted PD, cutoff decision, observed outcome, and credit consequence.",
+  row.names = FALSE
+)
+```
+
+## 1.5 Confusion matrices and bad rates
+
+```{r step-072}
+cm_cutoff_15 <- table(Actual = test$loan_st, Predicted = pred_cutoff_15)
+cm_cutoff_15
+```
+
+```{r step-073}
+actual_default <- as.numeric(as.character(test$loan_st))
+pred_all_no_default <- rep(0, length(actual_default))
+pred_all_default <- rep(1, length(actual_default))
+
+accuracy_summary <- data.frame(
+  rule = c(
+    "Full model with cutoff 0.15",
+    "Always predict no default",
+    "Always predict default"
+  ),
+  accuracy = c(
+    mean(pred_cutoff_15 == actual_default),
+    mean(pred_all_no_default == actual_default),
+    mean(pred_all_default == actual_default)
+  ),
+  defaults_detected = c(
+    sum(actual_default == 1 & pred_cutoff_15 == 1),
+    sum(actual_default == 1 & pred_all_no_default == 1),
+    sum(actual_default == 1 & pred_all_default == 1)
+  ),
+  accepted_defaults = c(
+    sum(actual_default == 1 & pred_cutoff_15 == 0),
+    sum(actual_default == 1 & pred_all_no_default == 0),
+    sum(actual_default == 1 & pred_all_default == 0)
+  )
+)
+```
+
+### Table 1.10 {#result-table-1-10}
+
+```{r table-1-10}
+accuracy_summary |>
+  mutate(
+    accuracy = fmt_pct(accuracy, 2),
+    defaults_detected = fmt_int(defaults_detected),
+    accepted_defaults = fmt_int(accepted_defaults)
+  ) |>
+  companion_kable(
+    caption = "Accuracy can reward poor credit-screening rules.",
+    row.names = FALSE
+  )
+```
+
+### Choosing a cutoff from an acceptance target
+
+```{r step-075}
+# Cutoff definition.
+cutoff <- as.numeric(quantile(pred_logi_full, 0.8))
+acceptance_cutoff_below <- mean(pred_logi_full <= cutoff)
+acceptance_cutoff_above <- mean(pred_logi_full > cutoff)
+cutoff
+```
+
+```{r step-076}
+acceptance_density <- ggplot(
+  pred_logi[pred_logi$model == "pred_logi_full", ], aes(x = pred, fill = model)
+) +
+  geom_density(alpha = 0.4, linewidth = 0.5) +
+  geom_vline(xintercept = cutoff, linetype = "dashed",
+             color = book_plot_colors[["risk"]], linewidth = 0.55) +
+  labs(y = "Density", x = "Predicted default probability")
+```
+
+### Figure 1.14 {#result-figure-1-14}
+
+```{r figure-1-14}
+#| fig-width: 5.5
+#| fig-height: 3.6
+#| fig-cap: "Figure 1.14. Full model prediction histogram with acceptance-rate cutoff."
+acceptance_density_labels <- data.frame(
+  x = c(
+    min(pred_logi_full) + 0.58 * (cutoff - min(pred_logi_full)),
+    cutoff + 0.55 * (max(pred_logi_full) - cutoff)
+  ),
+  y = max(full_pred_density$y) * 1.18,
+  label = c(
+    paste0("Accepted\n", fmt_pct(acceptance_cutoff_below, 1)),
+    paste0("Rejected\n", fmt_pct(acceptance_cutoff_above, 1))
+  )
+)
+
+acceptance_density +
+  scale_fill_manual(values = book_prediction_colors) +
+  expand_limits(y = max(full_pred_density$y) * 1.35) +
+  geom_label(
+    data = acceptance_density_labels,
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    fill = "white",
+    linewidth = 0,
+    size = 3.2,
+    lineheight = 0.95
+  ) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  book_figure_theme() + theme(legend.position = "none")
+```
+
+```{r step-078}
+cutoff_all <- quantile(pred_logi_full, seq(0.1, 1, 0.1))
+```
+
+### Table 1.11 {#result-table-1-11}
+
+```{r table-1-11}
+cutoff_quantile_table <- data.frame(
+  `Accepted share` = fmt_pct(seq(0.1, 1, 0.1), 0),
+  `Cutoff` = fmt_pct(as.numeric(cutoff_all), 2)
+)
+
+companion_kable(
+  cutoff_quantile_table,
+  caption = "Cutoffs implied by target acceptance rates.",
+  row.names = FALSE
+)
+```
+
+```{r step-080}
+# Calculate the predictions with the same model and new cutoff.
+pred_full_20 <- ifelse(pred_logi_full > cutoff, 1, 0)
+cm_full_20 <- table(
+  Actual = factor(test$loan_st, levels = c("0", "1")),
+  Predicted = factor(pred_full_20, levels = c(0, 1))
+)
+cm_full_20
+```
+
+```{r step-081}
+cat <- c("Correct no-default (true negatives).", 
+         "False default (false positives).", 
+         "False no-default (false negatives).", 
+         "Correct default (true positives).")
+cut_15 <- fmt_pct(
+  c(cm_cutoff_15["0", "0"], cm_cutoff_15["0", "1"],
+    cm_cutoff_15["1", "0"], cm_cutoff_15["1", "1"]) /
+    sum(cm_cutoff_15),
+  1
+)
+cut_accept_80 <- fmt_pct(
+  c(cm_full_20["0", "0"], cm_full_20["0", "1"],
+    cm_full_20["1", "0"], cm_full_20["1", "1"]) /
+    sum(cm_full_20),
+  1
+)
+```
+
+### Table 1.12 {#result-table-1-12}
+
+```{r table-1-12}
+data.frame(
+  classification = cat,
+  cutoff_0_15 = cut_15,
+  acceptance_80 = cut_accept_80
+) |>
+  companion_kable(
+    caption = "Classification outcomes under the 15% cutoff and the 80% acceptance rule.",
+    row.names = FALSE
+  )
+```
+
+```{r step-083}
+# Comparative table in detail.
+real_pred_20 <- data.frame(
+  observed_loan_status = test$loan_st,
+  pred_full_20 = pred_full_20,
+  "Did the model succeed?" = test$loan_st == pred_full_20,
+  check.names = FALSE
+)
+# Show some values.
+sample_real_pred_20 <- real_pred_20[131:140,]
+sample_correct_rejections <- rownames(sample_real_pred_20)[
+  sample_real_pred_20$pred_full_20 == 1 &
+    sample_real_pred_20$observed_loan_status == 1
+]
+sample_lost_good_customers <- rownames(sample_real_pred_20)[
+  sample_real_pred_20$pred_full_20 == 1 &
+    sample_real_pred_20$observed_loan_status == 0
+]
+sample_model_failures <- sum(!sample_real_pred_20[["Did the model succeed?"]])
+```
+
+### Table 1.13 {#result-table-1-13}
+
+```{r table-1-13}
+sample_real_pred_20 |>
+  rename(
+    `Observed outcome` = observed_loan_status,
+    `Binary prediction` = pred_full_20
+  ) |>
+  companion_kable(
+    caption = "Sample of test-set outcomes under the 80% acceptance rule.",
+    row.names = TRUE
+  )
+```
+
+```{r step-085}
+# Accepted.
+accept_20 <- sum(pred_full_20 == 0)
+# Rejected.
+reject_20 <- sum(pred_full_20 == 1)
+application_count_80 <- c(
+  total_applications = length(pred_full_20),
+  accepted_applications = accept_20,
+  rejected_applications = reject_20
+)
+application_count_80
+```
+
+```{r step-086}
+# First 12 accept/reject decisions.
+decision_sample <- head(data.frame(real_pred_20[,1:2],
+                decision = ifelse(real_pred_20$pred_full_20 == 0, 
+                                  "accept", "reject"),
+                evaluation =
+                  ifelse(real_pred_20$pred_full_20 == 0 &
+                           real_pred_20$observed_loan_status == 0,
+                         "good decision",
+                  ifelse(real_pred_20$pred_full_20 == 0 &
+                           real_pred_20$observed_loan_status == 1,
+                         "bad decision",
+                  ifelse(real_pred_20$pred_full_20 == 1 &
+                           real_pred_20$observed_loan_status == 1,
+                         "correct rejection",
+                         "lost good customer")))), 12)
+```
+
+### Table 1.14 {#result-table-1-14}
+
+```{r table-1-14}
+decision_sample |>
+  rename(
+    `Observed outcome` = observed_loan_status,
+    `Binary prediction` = pred_full_20,
+    Decision = decision,
+    Evaluation = evaluation
+  ) |>
+  companion_kable(
+    caption = "First 12 accept/reject decisions with ex-post evaluation.",
+    row.names = FALSE
+  )
+```
+
+### Default risk among accepted loans
+
+```{r step-088}
+# We accept loans that the model predicts a no-default (0).
+# In "accepted_loans" we know whether the accepted loans are in fact
+# default or no-default.
+accepted_index <- which(pred_full_20 == 0)
+accepted_loans <- as.numeric(as.character(real_pred_20$observed_loan_status[accepted_index]))
+# The code above says: if we accept the application, tell me what happened.
+length(accepted_loans)
+```
+
+```{r step-089}
+accepted_sample_index <- head(accepted_index, 10)
+accepted_sample <- data.frame(
+  `Application row` = rownames(real_pred_20)[accepted_sample_index],
+  `Predicted PD` = fmt_pct(pred_logi_full[accepted_sample_index], 2),
+  `Binary prediction` = pred_full_20[accepted_sample_index],
+  Decision = "accept",
+  `Observed outcome` = ifelse(
+    accepted_loans[seq_along(accepted_sample_index)] == 1,
+    "default",
+    "no default"
+  ),
+  check.names = FALSE
+)
+```
+
+### Table 1.15 {#result-table-1-15}
+
+```{r table-1-15}
+companion_kable(
+  accepted_sample,
+  caption = "First 10 accepted applications and their observed outcomes.",
+  row.names = FALSE
+)
+```
+
+```{r step-091}
+# bad_rate is the proportion of accepted loans that are in fact default.
+bad_rate_80 <- sum(accepted_loans == 1) / length(accepted_loans)
+```
+
+### Table 1.16 {#result-table-1-16}
+
+```{r table-1-16}
+companion_kable(
+  data.frame(
+    Quantity = c("Accepted defaults", "Accepted applications", "Bad rate"),
+    Value = c(
+      fmt_int(sum(accepted_loans == 1)),
+      fmt_int(length(accepted_loans)),
+      fmt_pct(bad_rate_80, 2)
+    )
+  ),
+  caption = "Bad rate among accepted loans at the 80% acceptance rule.",
+  row.names = FALSE
+)
+```
+
+```{r step-093}
+# New cutoff value.
+cutoff <- quantile(pred_logi_full, 0.65)
+# Split the pred_logi_full into a binary variable.
+pred_full_35 <- ifelse(pred_logi_full > cutoff, 1, 0)
+# A data frame with real and predicted loan status.
+real_pred_35 <- data.frame(
+  observed_loan_status = test$loan_st,
+  pred_full_35 = pred_full_35
+)
+# Loans that we accept given these new rules.
+accepted_loans <- real_pred_35[pred_full_35 == 0, 1]
+# Bad rate (accepted loan applications that are defaults).
+bad_rate_65 <- sum(accepted_loans == 1)/length(accepted_loans)
+```
+
+### Table 1.17 {#result-table-1-17}
+
+```{r table-1-17}
+companion_kable(
+  data.frame(
+    Quantity = c("Accepted defaults", "Accepted applications", "Bad rate"),
+    Value = c(
+      fmt_int(sum(accepted_loans == 1)),
+      fmt_int(length(accepted_loans)),
+      fmt_pct(bad_rate_65, 2)
+    )
+  ),
+  caption = "Bad rate among accepted loans at the 65% acceptance rule.",
+  row.names = FALSE
+)
+```
+
+```{r step-095}
+source("shared/figure-theme.R")
+```
+
+## 1.6 Acceptance strategy and model comparison
+
+```{r step-096}
+bank <- function(prob_of_default, actual_default) {
+  actual_default <- as.numeric(as.character(actual_default))
+
+  # Pre-define the acceptance rates
+  accept_rate <- seq(1, 0, by = -0.05)
+  
+  # Calculate cutoffs for each acceptance rate
+  cutoff <- quantile(prob_of_default, accept_rate)
+  # A target of zero rejects every application, including the lowest PD.
+  cutoff[accept_rate == 0] <- -Inf
+  
+  # Calculate bad rates for each cutoff
+  bad_rate <- vapply(seq_along(cutoff), function(i) {
+    if (accept_rate[i] == 0) return(NA_real_)
+    accepted <- prob_of_default <= cutoff[i]
+    mean(actual_default[accepted] == 1)
+  }, numeric(1))
+  
+  # Create the result table
+  table <- cbind(
+    accept_rate,
+    cutoff = round(cutoff, 4),
+    bad_rate = round(bad_rate, 4)
+  )
+  
+  return(list(table = table, bad_rate = bad_rate, accept_rate = accept_rate, cutoff = cutoff))
+}
+```
+
+```{r step-097}
+# Apply the bank function.
+bank_logi_full <- bank(pred_logi_full, test$loan_st)
+bank_logi_age <- bank(pred_logi_age, test$loan_st)
+```
+
+### Table 1.18 {#result-table-1-18}
+
+```{r table-1-18}
+data.frame(
+  Target = fmt_pct(bank_logi_age$accept_rate, 0),
+  `Age-only bad rate` = ifelse(is.na(bank_logi_age$bad_rate), "NA",
+                              fmt_pct(bank_logi_age$bad_rate, 2)),
+  `Full-model bad rate` = ifelse(is.na(bank_logi_full$bad_rate), "NA",
+                                fmt_pct(bank_logi_full$bad_rate, 2)),
+  check.names = FALSE
+) |>
+  companion_kable(
+    caption = "Bad rate by target acceptance rate for the age-only and full logistic models.",
+    row.names = FALSE
+  )
+```
+
+```{r step-099}
+# Combine the two datasets for easier comparison
+bank_logi_full$model <- "logi_full"
+bank_logi_age$model <- "logi_age"
+combined_data <- bind_rows(bank_logi_full, bank_logi_age) %>%
+  mutate(facet_color = unname(book_model_colors[model]))
+
+bad_rate_plot <- ggplot(
+  combined_data, aes(x = accept_rate, y = bad_rate, color = facet_color)
+) +
+  geom_line(linewidth = 0.8, na.rm = TRUE) +
+  facet_wrap(~model, nrow = 1) +
+  scale_color_identity() +
+  labs(x = "Target acceptance rate", y = "Bad rate")
+```
+
+### Figure 1.15 {#result-figure-1-15}
+
+```{r figure-1-15}
+#| fig-width: 5.5
+#| fig-height: 3.2
+#| fig-cap: "Figure 1.15. Bad-rate comparison between the age-only model and the full model."
+# Add vertical and horizontal lines for visualization
+highlight_lines <- tibble(
+  model = c("logi_full", "logi_full", "logi_age", "logi_age"),
+  accept_rate = c(bank_logi_full[["accept_rate"]][8],
+                  bank_logi_full[["accept_rate"]][5],
+                  bank_logi_age[["accept_rate"]][8],
+                  bank_logi_age[["accept_rate"]][5]),
+  bad_rate = c(bank_logi_full[["bad_rate"]][8],
+               bank_logi_full[["bad_rate"]][5],
+               bank_logi_age[["bad_rate"]][8],
+               bank_logi_age[["bad_rate"]][5]),
+  color = c("black", book_plot_colors[["risk"]], "black", book_plot_colors[["risk"]])
+)
+
+bad_rate_plot +
+  geom_vline(data = highlight_lines, aes(xintercept = accept_rate, color = color),
+             linetype = "dashed", linewidth = 0.3) +
+  geom_hline(data = highlight_lines, aes(yintercept = bad_rate, color = color),
+             linetype = "dashed", linewidth = 0.3) +
+  book_figure_theme() +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = c(0, 0.65, 0.8, 1)) +
+  scale_y_continuous(
+    labels = function(x) fmt_pct(x, 0),
+    limits = c(0, ceiling(100 * max(combined_data$bad_rate, na.rm = TRUE)) / 100),
+    breaks = seq(0, 1, by = 0.02)
+  )
+```
+
+### Balancing accepted loans and default costs
+
+```{r step-101}
+actual_default_strategy <- as.numeric(as.character(test$loan_st))
+
+net_payoff_strategy <- function(prob_of_default, accept_rate,
+                                good_loan_payoff = 1,
+                                bad_loan_cost = 5) {
+  cutoff <- unname(quantile(prob_of_default, accept_rate))
+  accept <- prob_of_default <= cutoff
+  accepted_good <- sum(actual_default_strategy[accept] == 0)
+  accepted_defaults <- sum(actual_default_strategy[accept] == 1)
+  accepted <- sum(accept)
+  net_payoff <- accepted_good * good_loan_payoff -
+    accepted_defaults * bad_loan_cost
+
+  data.frame(
+    accept_rate = accept_rate,
+    cutoff = cutoff,
+    accepted = accepted,
+    accepted_good = accepted_good,
+    accepted_defaults = accepted_defaults,
+    bad_rate = accepted_defaults / accepted,
+    net_payoff = net_payoff
+  )
+}
+
+acceptance_grid <- c(0.50, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90)
+net_payoff_results <- do.call(
+  rbind,
+  lapply(acceptance_grid, net_payoff_strategy,
+         prob_of_default = pred_logi_full)
+)
+
+best_net_payoff_row <- net_payoff_results[
+  which.max(net_payoff_results$net_payoff),
+]
+```
+
+### Table 1.19 {#result-table-1-19}
+
+```{r table-1-19}
+fmt_dollar <- function(x) {
+  paste0(ifelse(x < 0, "-$", "$"), fmt_int(abs(x)))
+}
+
+net_payoff_results |>
+  mutate(
+    cutoff = round(cutoff, 4),
+    bad_rate = fmt_pct(bad_rate, 2),
+    net_payoff = fmt_dollar(net_payoff)
+  ) |>
+  companion_kable(
+    caption = "Net payoff across acceptance rates for the full logistic model.",
+    row.names = FALSE
+  )
+```
+
+### Table 1.20 {#result-table-1-20}
+
+```{r table-1-20}
+best_net_payoff_check <- data.frame(
+  Quantity = c(
+    "Acceptance rate",
+    "Accepted good loans",
+    "Payoff from good loans ($1 each)",
+    "Accepted default loans",
+    "Cost from default loans ($5 each)",
+    "Net payoff"
+  ),
+  Value = c(
+    fmt_pct(best_net_payoff_row$accept_rate, 0),
+    fmt_int(best_net_payoff_row$accepted_good),
+    fmt_dollar(best_net_payoff_row$accepted_good * 1),
+    fmt_int(best_net_payoff_row$accepted_defaults),
+    fmt_dollar(-best_net_payoff_row$accepted_defaults * 5),
+    fmt_dollar(best_net_payoff_row$net_payoff)
+  )
+)
+
+companion_kable(
+  best_net_payoff_check,
+  caption = "Numerical check of the best net-payoff row.",
+  row.names = FALSE
+)
+```
+
+### A cutoff from expected payoff
+
+```{r step-104}
+repayment_payoff <- 1
+default_cost <- 5
+payoff_cutoff <- repayment_payoff / (repayment_payoff + default_cost)
+payoff_cutoff
+```
+
+```{r step-105}
+best_net_payoff <- function(bad_loan_cost) {
+  payoff_grid <- do.call(
+    rbind,
+    lapply(seq(0.50, 0.95, 0.05), net_payoff_strategy,
+           prob_of_default = pred_logi_full,
+           bad_loan_cost = bad_loan_cost)
+  )
+
+  payoff_grid[which.max(payoff_grid$net_payoff), ]
+}
+
+net_payoff_sensitivity <- do.call(
+  rbind,
+  lapply(c(2, 5, 10, 15), best_net_payoff)
+)
+```
+
+### Table 1.21 {#result-table-1-21}
+
+```{r table-1-21}
+data.frame(
+  bad_loan_cost = fmt_dollar(c(2, 5, 10, 15)),
+  best_accept_rate = net_payoff_sensitivity$accept_rate,
+  accepted_defaults = net_payoff_sensitivity$accepted_defaults,
+  bad_rate = net_payoff_sensitivity$bad_rate,
+  net_payoff = fmt_dollar(net_payoff_sensitivity$net_payoff)
+) |>
+  mutate(
+    best_accept_rate = fmt_pct(best_accept_rate, 0),
+    accepted_defaults = fmt_int(accepted_defaults),
+    bad_rate = fmt_pct(bad_rate, 2)
+  ) |>
+  companion_kable(
+    caption = "Net-payoff sensitivity to the cost of accepting a default.",
+    row.names = FALSE
+  )
+```
+
+### From a default probability to an expected dollar loss
+
+```{r step-107}
+el_applicant <- test[1, ]
+el_pd <- unname(pred_logi_full[1])
+el_ead <- el_applicant$l_amnt
+el_recovery <- 0.40
+el_lgd <- 1 - el_recovery
+el_loss_in_default <- el_lgd * el_ead
+el_expected_loss <- el_pd * el_loss_in_default
+el_half_exposure_loss <- el_pd * el_lgd * (el_ead / 2)
+
+round(c(PD = el_pd, EAD = el_ead, LGD = el_lgd,
+        loss_in_default = el_loss_in_default,
+        expected_loss = el_expected_loss), 4)
+```
+
+## 1.7 ROC, AUC, and calibration
+
+### Table 1.22 {#result-table-1-22}
+
+```{r table-1-22}
+classification_equivalence_table <- data.frame(
+  `Actual outcome` = c(
+    "No default",
+    "No default",
+    "Default",
+    "Default"
+  ),
+  `Model prediction` = c(
+    "No default",
+    "Default",
+    "No default",
+    "Default"
+  ),
+  `Statistical name` = c(
+    "True negative (TN)",
+    "False positive (FP)",
+    "False negative (FN)",
+    "True positive (TP)"
+  ),
+  `Credit reading` = c(
+    "The model expected repayment, and the borrower repaid.",
+    "The model expected default, but the borrower would have repaid.",
+    "The model expected repayment, but the borrower defaulted.",
+    "The model expected default, and the borrower defaulted."
+  ),
+  `Lending consequence` = c(
+    "Good loan accepted",
+    "Good applicant rejected",
+    "Defaulting borrower accepted",
+    "Default avoided"
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  classification_equivalence_table,
+  caption = "Confusion-matrix language translated into credit decisions.",
+  row.names = FALSE
+)
+```
+
+### Table 1.23 {#result-table-1-23}
+
+```{r table-1-23}
+classification_metric_table <- data.frame(
+  Metric = c(
+    "Sensitivity",
+    "Specificity",
+    "False positive rate",
+    "False negative rate"
+  ),
+  Formula = c(
+    "$TP/(TP+FN)$",
+    "$TN/(TN+FP)$",
+    "$FP/(TN+FP)=1-\\text{specificity}$",
+    "$FN/(TP+FN)=1-\\text{sensitivity}$"
+  ),
+  `Credit meaning` = c(
+    "Among actual defaults, the share correctly detected as predicted defaults.",
+    "Among actual non-defaults, the share correctly kept as predicted no-defaults.",
+    "Among good borrowers, the share wrongly rejected.",
+    "Among defaulting borrowers, the share wrongly accepted."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  classification_metric_table,
+  caption = "Sensitivity, specificity, and error rates in credit language.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-110}
+# Calculate ROC curves
+ROC_logi_full <- roc(test$loan_st, pred_logi_full, quiet = TRUE)
+ROC_logi_age <- roc(test$loan_st, pred_logi_age, quiet = TRUE)
+auc_logi_full <- as.numeric(auc(ROC_logi_full))
+auc_logi_age <- as.numeric(auc(ROC_logi_age))
+
+roc_to_df_logistic <- function(roc_object, model_name) {
+  data.frame(
+    false_positive_rate = 1 - roc_object$specificities,
+    true_positive_rate = roc_object$sensitivities,
+    model = model_name,
+    auc = as.numeric(auc(roc_object))
+  )
+}
+
+roc_logistic_comparison <- bind_rows(
+  roc_to_df_logistic(ROC_logi_full, "logi_full"),
+  roc_to_df_logistic(ROC_logi_age, "logi_age")
+) |>
+  mutate(
+    model_label = paste0(model, " (AUC = ", fmt_num(auc, 4), ")"),
+    model_label = factor(model_label, levels = unique(model_label))
+  ) |>
+  arrange(model_label, false_positive_rate)
+
+roc_comparison_plot <- ggplot(
+  roc_logistic_comparison,
+  aes(x = 1 - false_positive_rate, y = true_positive_rate, color = model_label)
+) +
+  annotate("segment", x = 1, y = 0, xend = 0, yend = 1,
+    linetype = "dashed",
+    color = book_plot_colors[["reference"]],
+    linewidth = 0.35
+  ) +
+  geom_line(linewidth = 0.8) +
+  labs(x = "Specificity",
+       y = "Sensitivity") +
+  coord_equal()
+```
+
+### Figure 1.16 {#result-figure-1-16}
+
+```{r figure-1-16}
+#| fig-width: 5.5
+#| fig-height: 5.1
+#| fig-cap: "Figure 1.16. ROC curves: Full model in blue, age model in orange."
+roc_comparison_plot +
+  scale_color_manual(
+    values = unname(book_model_colors[c("logi_full", "logi_age")]),
+    name = NULL
+  ) +
+  scale_x_reverse(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(1, 0),
+    expand = c(0.01, 0.01)
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1),
+    expand = c(0.01, 0.01)
+  ) +
+  labs(
+    x = "Specificity",
+    y = "Sensitivity"
+  ) +
+  coord_equal() +
+  book_figure_theme()
+```
+
+```{r step-112}
+# Compute the AUCs:
+data.frame(
+  model = c("logi_full", "logi_age"),
+  auc = round(c(auc_logi_full, auc_logi_age), 4)
+)
+```
+
+### Checking calibration by risk decile
+
+```{r step-113}
+calibration_data <- bind_rows(
+  data.frame(
+    model = "logi_full",
+    application_row = as.integer(rownames(test)),
+    observed_default = as.numeric(as.character(test$loan_st)),
+    predicted_pd = pred_logi_full
+  ),
+  data.frame(
+    model = "logi_age",
+    application_row = as.integer(rownames(test)),
+    observed_default = as.numeric(as.character(test$loan_st)),
+    predicted_pd = pred_logi_age
+  )
+)
+
+calibration_models <- calibration_data |>
+  arrange(model, predicted_pd, application_row) |>
+  group_by(model) |>
+  mutate(risk_decile = ntile(predicted_pd, 10)) |>
+  group_by(model, risk_decile) |>
+  summarize(
+    applications = n(),
+    average_predicted_pd = mean(predicted_pd),
+    observed_default_rate = mean(observed_default),
+    .groups = "drop"
+  ) |>
+  ungroup()
+```
+
+### Table 1.24 {#result-table-1-24}
+
+```{r table-1-24}
+calibration_models |>
+  mutate(
+    average_predicted_pd = fmt_pct(average_predicted_pd, 2),
+    observed_default_rate = fmt_pct(observed_default_rate, 2)
+  ) |>
+  companion_kable(
+    caption = "Calibration by predicted-risk decile for the full and age-only models.",
+    col.names = c("Model", "Predicted-risk decile", "Applications",
+                  "Mean predicted PD", "Observed default rate"),
+    row.names = FALSE
+  )
+```
+
+```{r step-115}
+calibration_plot <- ggplot(calibration_models,
+       aes(x = average_predicted_pd, y = observed_default_rate,
+           color = model)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed",
+              color = book_plot_colors[["reference"]], linewidth = 0.35) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.2) +
+  labs(x = "Average predicted probability of default",
+       y = "Observed default rate") +
+  coord_equal()
+```
+
+### Figure 1.17 {#result-figure-1-17}
+
+```{r figure-1-17}
+#| fig-width: 5.5
+#| fig-height: 5.1
+#| fig-cap: "Figure 1.17. Calibration by decile: full model in blue, age model in orange."
+calibration_limit <- ceiling(10 * max(
+  calibration_models$average_predicted_pd,
+  calibration_models$observed_default_rate
+)) / 10
+calibration_plot +
+  scale_color_manual(values = book_model_colors, labels = book_model_labels) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1),
+                     limits = c(0, calibration_limit)) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1),
+                     limits = c(0, calibration_limit)) +
+  book_figure_theme()
+```
+
+### Comparing expected and observed default counts
+
+```{r step-117}
+calibration_expected_defaults <- sum(pred_logi_full)
+calibration_observed_defaults <- sum(
+  as.numeric(as.character(test$loan_st))
+)
+calibration_count_gap <- calibration_expected_defaults -
+  calibration_observed_defaults
+calibration_decile_gap <- subset(
+  calibration_models, model == "logi_full"
+)
+calibration_decile_gap$count_gap <- with(
+  calibration_decile_gap,
+  applications * (average_predicted_pd - observed_default_rate)
+)
+stopifnot(isTRUE(all.equal(
+  sum(calibration_decile_gap$count_gap), calibration_count_gap
+)))
+round(c(expected = calibration_expected_defaults,
+        observed = calibration_observed_defaults,
+        expected_minus_observed = calibration_count_gap), 2)
+```
+
+### Measuring probability errors with the Brier score
+
+```{r step-118}
+brier_score <- function(actual, predicted_probability) {
+  mean((predicted_probability - actual)^2)
+}
+
+actual_default <- as.numeric(as.character(test$loan_st))
+constant_pd <- rep(mean(actual_default), length(actual_default))
+
+brier_results <- data.frame(
+  model = c("logi_full", "logi_age", "constant default rate"),
+  brier_score = c(
+    brier_score(actual_default, pred_logi_full),
+    brier_score(actual_default, pred_logi_age),
+    brier_score(actual_default, constant_pd)
+  )
+)
+
+baseline_brier <- brier_results$brier_score[
+  brier_results$model == "constant default rate"
+]
+brier_results$brier_skill <- 1 - brier_results$brier_score / baseline_brier
+```
+
+### Table 1.25 {#result-table-1-25}
+
+```{r table-1-25}
+brier_results |>
+  mutate(
+    brier_score = fmt_num(brier_score, 4),
+    brier_skill = fmt_num(brier_skill, 4)
+  ) |>
+  companion_kable(
+    caption = "Brier score and Brier skill against a constant default-rate benchmark.",
+    col.names = c("Model", "Brier score", "Brier skill"),
+    row.names = FALSE
+  )
+```
+
+### Comparing lending policies on the ROC curve
+
+```{r step-120}
+# Calculate sensitivity and specificity from a confusion matrix.
+classification_metrics <- function(actual, predicted) {
+  cm <- table(
+    Actual = factor(actual, levels = c("0", "1")),
+    Predicted = factor(predicted, levels = c(0, 1))
+  )
+  tn <- cm["0", "0"]
+  fp <- cm["0", "1"]
+  fn <- cm["1", "0"]
+  tp <- cm["1", "1"]
+  c(
+    sensitivity = as.numeric(tp / (tp + fn)),
+    specificity = as.numeric(tn / (tn + fp))
+  )
+}
+
+# Cutoffs implied by target acceptance rates.
+cutoff_full_80 <- unname(quantile(pred_logi_full, probs = 0.80))
+cutoff_age_80 <- unname(quantile(pred_logi_age, probs = 0.80))
+cutoff_full_65 <- unname(quantile(pred_logi_full, probs = 0.65))
+cutoff_age_65 <- unname(quantile(pred_logi_age, probs = 0.65))
+
+# Binary predictions: 1 = reject as predicted default, 0 = accept.
+pred_full_80 <- ifelse(pred_logi_full > cutoff_full_80, 1, 0)
+pred_age_80 <- ifelse(pred_logi_age > cutoff_age_80, 1, 0)
+pred_full_65 <- ifelse(pred_logi_full > cutoff_full_65, 1, 0)
+pred_age_65 <- ifelse(pred_logi_age > cutoff_age_65, 1, 0)
+
+metrics_full_80 <- classification_metrics(test$loan_st, pred_full_80)
+metrics_age_80 <- classification_metrics(test$loan_st, pred_age_80)
+metrics_full_65 <- classification_metrics(test$loan_st, pred_full_65)
+metrics_age_65 <- classification_metrics(test$loan_st, pred_age_65)
+
+# Combine the results.
+results_df <- data.frame(
+  Model = c("logi_full", "logi_age", "logi_full", "logi_age"),
+  Policy = c("Accept about 80%", "Accept about 80%",
+             "Accept about 65%", "Accept about 65%"),
+  Accepted_in_test_set = c(mean(pred_full_80 == 0),
+                           mean(pred_age_80 == 0),
+                           mean(pred_full_65 == 0),
+                           mean(pred_age_65 == 0)),
+  PD_cutoff = c(cutoff_full_80, cutoff_age_80,
+                cutoff_full_65, cutoff_age_65),
+  Sensitivity = c(metrics_full_80["sensitivity"],
+                  metrics_age_80["sensitivity"],
+                  metrics_full_65["sensitivity"],
+                  metrics_age_65["sensitivity"]),
+  Specificity = c(metrics_full_80["specificity"],
+                  metrics_age_80["specificity"],
+                  metrics_full_65["specificity"],
+                  metrics_age_65["specificity"])
+)
+```
+
+### Table 1.26 {#result-table-1-26}
+
+```{r table-1-26}
+results_df |>
+  mutate(
+    Accepted_in_test_set = fmt_pct(Accepted_in_test_set, 1),
+    PD_cutoff = fmt_pct(PD_cutoff, 2),
+    Sensitivity = fmt_pct(Sensitivity, 1),
+    Specificity = fmt_pct(Specificity, 1)
+  ) |>
+  companion_kable(
+    caption = "Cutoffs and error rates implied by two acceptance policies.",
+    col.names = c(
+      "Model",
+      "Bank policy",
+      "Accepted in test set",
+      "PD cutoff",
+      "Sensitivity",
+      "Specificity"
+    ),
+    row.names = FALSE
+  )
+```
+
+```{r step-122}
+roc_full_df <- roc_to_df_logistic(ROC_logi_full, "logi_full") |>
+  arrange(false_positive_rate)
+
+roc_acceptance_guides <- data.frame(
+  target = c("Acceptance rate of 80%", "Acceptance rate of 65%"),
+  false_positive_rate = c(
+    1 - metrics_full_80["specificity"],
+    1 - metrics_full_65["specificity"]
+  ),
+  true_positive_rate = c(
+    metrics_full_80["sensitivity"],
+    metrics_full_65["sensitivity"]
+  )
+)
+
+roc_policy_plot <- ggplot(
+  roc_full_df, aes(x = 1 - false_positive_rate, y = true_positive_rate)
+) +
+  annotate("segment", x = 1, y = 0, xend = 0, yend = 1, linetype = "dashed",
+              color = book_plot_colors[["reference"]], linewidth = 0.35) +
+  geom_line(color = book_plot_colors[["primary"]], linewidth = 0.8) +
+  geom_point(data = roc_acceptance_guides, aes(color = target), size = 2.4) +
+  scale_color_manual(values = c("Acceptance rate of 80%" = book_plot_colors[["risk"]],
+                                "Acceptance rate of 65%" = "black")) +
+  labs(x = "Specificity",
+       y = "Sensitivity") +
+  coord_equal()
+```
+
+### Figure 1.18 {#result-figure-1-18}
+
+```{r figure-1-18}
+#| fig-width: 5.5
+#| fig-height: 5.1
+#| fig-cap: "Figure 1.18. Full model in blue, evaluated in two acceptance rates: 65% in black, 80% in red."
+roc_acceptance_labels <- data.frame(
+  target = c("Acceptance rate of 80%", "Acceptance rate of 65%"),
+  false_positive_rate = roc_acceptance_guides$false_positive_rate,
+  true_positive_rate = roc_acceptance_guides$true_positive_rate,
+  label_x = c(0.56, 0.56),
+  label_y = c(0.22, 0.46),
+  label = c(
+    paste0(
+      "80% policy\n",
+      "Sensitivity = ", fmt_pct(metrics_full_80["sensitivity"], 1), "\n",
+      "Specificity = ", fmt_pct(metrics_full_80["specificity"], 1)
+    ),
+    paste0(
+      "65% policy\n",
+      "Sensitivity = ", fmt_pct(metrics_full_65["sensitivity"], 1), "\n",
+      "Specificity = ", fmt_pct(metrics_full_65["specificity"], 1)
+    )
+  )
+)
+
+roc_policy_plot +
+  geom_segment(
+    data = roc_acceptance_guides,
+    aes(
+      x = 1 - false_positive_rate,
+      xend = 1 - false_positive_rate,
+      y = 0,
+      yend = true_positive_rate,
+      color = target
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.35
+  ) +
+  geom_segment(
+    data = roc_acceptance_guides,
+    aes(
+      x = 1,
+      xend = 1 - false_positive_rate,
+      y = true_positive_rate,
+      yend = true_positive_rate,
+      color = target
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.35
+  ) +
+  geom_segment(
+    data = roc_acceptance_labels,
+    aes(
+      x = 1 - false_positive_rate,
+      xend = 1 - label_x + 0.02,
+      y = true_positive_rate,
+      yend = label_y,
+      color = target
+    ),
+    inherit.aes = FALSE,
+    linewidth = 0.25,
+    show.legend = FALSE
+  ) +
+  geom_label(
+    data = roc_acceptance_labels,
+    aes(
+      x = 1 - label_x,
+      y = label_y,
+      label = label,
+      color = target
+    ),
+    inherit.aes = FALSE,
+    hjust = 0,
+    size = 3.2,
+    lineheight = 0.95,
+    linewidth = 0,
+    label.padding = grid::unit(0.15, "lines"),
+    fill = "white",
+    show.legend = FALSE
+  ) +
+  scale_x_reverse(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(1, 0),
+    expand = c(0.01, 0.01)
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1),
+    expand = c(0.01, 0.01)
+  ) +
+  book_figure_theme()
+```
+
+```{r step-124}
+cm_full_80 <- table(
+  Actual = factor(
+    test$loan_st,
+    levels = c("0", "1"),
+    labels = c("No default", "Default")
+  ),
+  Decision = factor(
+    pred_full_80,
+    levels = c(0, 1),
+    labels = c("Accept", "Reject")
+  )
+)
+tn_80 <- cm_full_80["No default", "Accept"]
+fp_80 <- cm_full_80["No default", "Reject"]
+fn_80 <- cm_full_80["Default", "Accept"]
+tp_80 <- cm_full_80["Default", "Reject"]
+sens_80 <- as.numeric(tp_80 / (tp_80 + fn_80))
+spec_80 <- as.numeric(tn_80 / (tn_80 + fp_80))
+
+cm_full_80
+```
+
+```{r step-125}
+cm_full_65 <- table(
+  Actual = factor(
+    test$loan_st,
+    levels = c("0", "1"),
+    labels = c("No default", "Default")
+  ),
+  Decision = factor(
+    pred_full_65,
+    levels = c(0, 1),
+    labels = c("Accept", "Reject")
+  )
+)
+tn_65 <- cm_full_65["No default", "Accept"]
+fp_65 <- cm_full_65["No default", "Reject"]
+fn_65 <- cm_full_65["Default", "Accept"]
+tp_65 <- cm_full_65["Default", "Reject"]
+sens_65 <- as.numeric(tp_65 / (tp_65 + fn_65))
+spec_65 <- as.numeric(tn_65 / (tn_65 + fp_65))
+
+cm_full_65
+```
+
+### Random and perfect ranking benchmarks
+
+```{r step-126}
+set.seed(2020)
+random_score_rows <- sort(as.integer(rownames(test)))
+random_scores <- setNames(runif(nrow(test)), random_score_rows)
+pred_rand_model <- unname(random_scores[rownames(test)])
+ROC_rand <- roc(test$loan_st, pred_rand_model, quiet = TRUE)
+auc_rand <- as.numeric(auc(ROC_rand))
+
+roc_rand_df <- roc_to_df_logistic(ROC_rand, "Random score") |>
+  arrange(false_positive_rate)
+
+random_roc_plot <- ggplot(roc_rand_df, aes(x = 1 - false_positive_rate, y = true_positive_rate)) +
+  annotate("segment", x = 1, y = 0, xend = 0, yend = 1,
+    linetype = "dashed",
+    color = book_plot_colors[["reference"]],
+    linewidth = 0.35
+  ) +
+  geom_line(color = book_plot_colors[["risk"]], linewidth = 0.8) +
+  labs(x = "Specificity",
+       y = "Sensitivity") +
+  coord_equal()
+
+c(random_score_auc = round(auc_rand, 4))
+```
+
+### Figure 1.19 {#result-figure-1-19}
+
+```{r figure-1-19}
+#| fig-width: 5.5
+#| fig-height: 5.1
+#| fig-cap: "Figure 1.19. Random-score ROC benchmark."
+random_roc_plot +
+  scale_x_reverse(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(1, 0),
+    expand = c(0.01, 0.01)
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1),
+    expand = c(0.01, 0.01)
+  ) +
+  labs(
+    x = "Specificity",
+    y = "Sensitivity"
+  ) +
+  coord_equal() +
+  book_figure_theme()
+```
+
+```{r step-128}
+pred_perfect_model <- as.numeric(as.character(test$loan_st))
+ROC_perfect <- roc(test$loan_st, pred_perfect_model, quiet = TRUE)
+auc_perfect <- as.numeric(auc(ROC_perfect))
+
+roc_perfect_df <- data.frame(
+  false_positive_rate = c(0, 0, 1),
+  true_positive_rate = c(0, 1, 1)
+)
+
+perfect_roc_plot <- ggplot(roc_perfect_df, aes(x = 1 - false_positive_rate, y = true_positive_rate)) +
+  annotate("segment", x = 1, y = 0, xend = 0, yend = 1,
+    linetype = "dashed",
+    color = book_plot_colors[["reference"]],
+    linewidth = 0.35
+  ) +
+  geom_path(color = book_plot_colors[["primary"]], linewidth = 0.8) +
+  labs(x = "Specificity",
+       y = "Sensitivity") +
+  coord_equal()
+
+c(perfect_score_auc = round(auc_perfect, 4))
+```
+
+### Figure 1.20 {#result-figure-1-20}
+
+```{r figure-1-20}
+#| fig-width: 5.5
+#| fig-height: 5.1
+#| fig-cap: "Figure 1.20. Perfect-score ROC benchmark."
+perfect_roc_plot +
+  scale_x_reverse(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(1, 0),
+    expand = c(0.01, 0.01)
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1.02),
+    breaks = seq(0, 1, 0.25),
+    expand = c(0.01, 0.01)
+  ) +
+  labs(
+    x = "Specificity",
+    y = "Sensitivity"
+  ) +
+  coord_equal() +
+  book_figure_theme()
+```
+
+## Session and numeric results
+
+```{r companion-results}
+companion_finish(knitr::knit_global())
+```

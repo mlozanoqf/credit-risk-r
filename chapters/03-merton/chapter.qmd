@@ -1,0 +1,1768 @@
+---
+title: "The Merton model"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+execute:
+  echo: true
+  cache: false
+  error: false
+  warning: false
+  message: false
+---
+
+Computational companion. Run from the project root in source order. Each result
+uses the preceding calculations in this chapter. Book numbering follows the
+11 October 2026 review version. The chapter README contains the result index.
+
+```{r companion-setup}
+source("shared/output.R")
+companion_setup("03-merton")
+```
+
+## 3.1 Estimating asset value and risk-neutral PD
+
+```{r step-001}
+source("shared/figure-theme.R")
+```
+
+```{r step-002}
+knitr::opts_chunk$set(fig.width = 5.5, fig.height = 4)
+```
+
+```{r step-003}
+source("chapters/03-merton/helpers/packages.R")
+
+source("shared/formatting.R")
+```
+
+### Inputs and Hull equations
+
+```{r step-004}
+E0 <- 3 # Value of equity today; this is market capitalization.
+
+se <- 0.8 # Stock return volatility.
+
+rf <- 0.05 # Risk-free rate.
+
+TT <- 1 # Maturity.
+
+D <- 10 # Promised debt payment due at maturity. The Bloomberg function DDIS is useful.
+```
+
+### Solving the two Merton equations
+
+```{r step-005}
+start_V0 <- E0 + D * exp(-rf * TT)
+
+start_sv <- se * E0 / start_V0
+
+d1_merton <- function(V0, sv) {
+  (log(V0 / D) + (rf + sv^2 / 2) * TT) / (sv * sqrt(TT))
+}
+
+d2_merton <- function(V0, sv) {
+  d1_merton(V0, sv) - sv * sqrt(TT)
+}
+
+equity_value_error <- function(V0, sv) {
+  V0 * pnorm(d1_merton(V0, sv)) -
+    D * exp(-rf * TT) * pnorm(d2_merton(V0, sv)) -
+    E0
+}
+
+equity_volatility_error <- function(V0, sv) {
+  pnorm(d1_merton(V0, sv)) * sv * V0 - se * E0
+}
+
+merton_squared_error <- function(x)
+  (equity_value_error(x[1], x[2]))^2 + (equity_volatility_error(x[1], x[2]))^2
+
+V0_sv <- optim(
+  par = c(V0 = start_V0, sv = start_sv),
+  fn = merton_squared_error,
+  method = "L-BFGS-B",
+  lower = c(V0 = 1e-6, sv = 1e-6),
+  control = list(
+    parscale = c(V0 = 10, sv = 0.2),
+    ndeps = c(V0 = 1e-6, sv = 1e-8)
+  )
+)
+
+V0 <- unname(V0_sv$par["V0"])
+
+sv <- unname(V0_sv$par["sv"])
+```
+
+### From $d_2$ to the risk-neutral PD
+
+```{r step-006}
+PD <- function(V0, sv) {
+  pnorm(-(((log(V0 / D) + (rf + sv^2 / 2) * TT) /
+             (sv * sqrt(TT))) - sv * sqrt(TT))) }
+
+pd <- PD(V0, sv)
+```
+
+### Table 3.1 {#result-table-3-1}
+
+```{r table-3-1}
+companion_kable(
+  data.frame(
+    Quantity = c(
+      "Estimated asset value",
+      "Estimated asset volatility",
+      "Merton risk-neutral PD"
+    ),
+    Value = c(
+      fmt_num(V0, 4),
+      fmt_pct(sv, 4),
+      fmt_pct(pd, 4)
+    )
+  ),
+  caption = "Estimated Merton asset value, asset volatility, and risk-neutral default probability.",
+  row.names = FALSE
+)
+```
+
+```{r step-008}
+d1 <- d1_merton(V0, sv)
+
+d2 <- d2_merton(V0, sv)
+
+Nd1 <- pnorm(d1)
+
+Nd2 <- pnorm(d2)
+```
+
+### Table 3.2 {#result-table-3-2}
+
+```{r table-3-2}
+merton_d_table <- data.frame(
+  Quantity = c("$d_1$", "$N(d_1)$", "$d_2$", "$N(d_2)$", "$N(-d_2)$"),
+  Value = c(
+    fmt_num(d1, 7),
+    fmt_num(Nd1, 7),
+    fmt_num(d2, 7),
+    fmt_num(Nd2, 7),
+    fmt_num(pd, 7)
+  )
+)
+
+companion_kable(
+  merton_d_table,
+  caption = "The d-values and normal probabilities behind the Merton PD.",
+  escape = FALSE,
+  row.names = FALSE
+)
+```
+
+```{r step-010}
+merton_default_threshold <- (
+  log(D / V0) - (rf - sv^2 / 2) * TT
+) / (sv * sqrt(TT))
+merton_default_threshold
+```
+
+```{r step-011}
+xseq <- seq(-4, 4, 0.01)
+
+densities <- dnorm(xseq, 0, 1) # Standard normal distribution.
+```
+
+```{r step-012}
+legend_nd2_expression <- paste0("N(d[2])==", round(Nd2, 7))
+
+legend_pd_expression <- paste0("N(-d[2])==", round(pd, 7), "~'in red.'")
+```
+
+```{r step-013}
+normal_density_data <- data.frame(
+  x = xseq,
+  density = densities
+)
+
+left_tail_data <- normal_density_data[normal_density_data$x < -d2, ]
+
+right_tail_data <- normal_density_data[normal_density_data$x >= -d2, ]
+
+plot_fig_trartpod <- ggplot2::ggplot(normal_density_data, ggplot2::aes(x = x, y = density)) +
+  ggplot2::geom_area(data = right_tail_data, fill = "#009E73", color = NA) +
+  ggplot2::geom_area(data = left_tail_data, fill = "#B22222", color = NA) +
+  ggplot2::geom_line(linewidth = 0.9, color = "black")
+```
+
+### Figure 3.1 {#result-figure-3-1}
+
+```{r figure-3-1}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.1. The red area represents the risk-neutral probability of default."
+plot_fig_trartpod +
+  ggplot2::geom_hline(yintercept = 0, linewidth = 0.4, color = "black") +
+  ggplot2::geom_vline(xintercept = -d2, linetype = "dotted", linewidth = 0.8, color = "black") +
+  ggplot2::annotate("text", x = -3.8, y = 0.377, hjust = 0, label = legend_nd2_expression,
+    parse = TRUE, size = 3.4) +
+  ggplot2::annotate("text", x = -3.8, y = 0.352, hjust = 0, label = "'in green and'", parse = TRUE,
+    size = 3.4) +
+  ggplot2::annotate("text", x = -3.8, y = 0.327, hjust = 0, label = legend_pd_expression,
+    parse = TRUE, size = 3.4) +
+  ggplot2::annotate("text", x = -3.8, y = 0.305, hjust = 0, label = "N(d[2])+N(-d[2])==1",
+    parse = TRUE, size = 3.4) +
+  ggplot2::coord_cartesian(xlim = c(-4, 4), ylim = c(0, 0.42), expand = FALSE) +
+  ggplot2::labs(x = expression(paste("d values (", -d[2], " is the dotted line)")), y = "Density") +
+  book_figure_theme()
+```
+
+### Checking the numerical solution
+
+```{r step-015}
+merton_objective_at_solution <- merton_squared_error(x = c(V0, sv))
+```
+
+### Table 3.3 {#result-table-3-3}
+
+```{r table-3-3}
+companion_kable(
+  data.frame(
+    Quantity = c(
+      "Objective function value",
+      "Rounded objective function value"
+    ),
+    Value = c(
+      fmt_num(merton_objective_at_solution, 10),
+      fmt_num(round(merton_objective_at_solution, 6), 6)
+    )
+  ),
+  caption = "Objective function value at the estimated Merton solution.",
+  row.names = FALSE
+)
+```
+
+```{r step-017}
+V0.seq <- seq(from = 4, to = 20, length.out = 100)
+
+sv.rep <- rep(sv, 100)
+
+FG <- function(V0, sv) { (equity_value_error(V0, sv))^2 + (equity_volatility_error(V0, sv))^2 }
+
+FG.V0 <- mapply(FG, V0.seq, sv.rep)
+```
+
+```{r step-018}
+objective_at_solution <- FG(V0, sv)
+
+slice_v0_data <- data.frame(
+  asset_value = V0.seq,
+  objective = FG.V0
+)
+
+solution_v0_data <- data.frame(
+  asset_value = V0,
+  objective = objective_at_solution
+)
+
+plot_fig_hwftvotaactvoaatz <- ggplot2::ggplot(slice_v0_data, ggplot2::aes(x = asset_value, y = objective)) +
+  ggplot2::geom_line(linewidth = 0.8, color = "black")
+```
+
+### Figure 3.2 {#result-figure-3-2}
+
+```{r figure-3-2}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.2. Objective-function slice when asset volatility is held fixed."
+plot_fig_hwftvotaactvoaatz +
+  ggplot2::geom_vline(xintercept = V0, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_hline(yintercept = objective_at_solution, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_point(data = solution_v0_data, ggplot2::aes(x = asset_value, y = objective),
+    inherit.aes = FALSE, shape = 21, size = 4.2, stroke = 1.2, color = "#B22222", fill = "white") +
+  ggplot2::labs(x = expression(V[0]), y = expression(F(x, y)^2 + G(x, y)^2)) +
+  book_figure_theme()
+```
+
+```{r step-020}
+sv.seq <- seq(0.001, 0.6, length.out = 100)
+
+V0.rep <- rep(V0, 100)
+
+FG.sv <- mapply(FG, V0.rep, sv.seq)
+
+slice_sv_data <- data.frame(
+  asset_volatility = sv.seq,
+  objective = FG.sv
+)
+
+solution_sv_data <- data.frame(
+  asset_volatility = sv,
+  objective = objective_at_solution
+)
+
+plot_fig_hwftvotaatzactvota <- ggplot2::ggplot(slice_sv_data, ggplot2::aes(x = asset_volatility, y = objective)) +
+  ggplot2::geom_line(linewidth = 0.8, color = "black")
+```
+
+### Figure 3.3 {#result-figure-3-3}
+
+```{r figure-3-3}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.3. Objective-function slice when asset value is held fixed."
+plot_fig_hwftvotaatzactvota +
+  ggplot2::geom_vline(xintercept = sv, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_hline(yintercept = objective_at_solution, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_point(data = solution_sv_data, ggplot2::aes(x = asset_volatility, y = objective),
+    inherit.aes = FALSE, shape = 21, size = 4.2, stroke = 1.2, color = "#B22222", fill = "white") +
+  ggplot2::labs(x = expression(sigma[V]), y = expression(F(x, y)^2 + G(x, y)^2)) +
+  book_figure_theme()
+```
+
+```{r step-022}
+z <- outer(V0.seq, sv.seq, FG) # z is now 100x100 matrix.
+```
+
+```{r step-023}
+contour_data <- expand.grid(
+  asset_value = V0.seq,
+  asset_volatility = sv.seq
+)
+
+contour_data$objective <- as.vector(z)
+
+solution_surface_data <- data.frame(
+  asset_value = V0,
+  asset_volatility = sv
+)
+
+contour_breaks <- c(
+  0.001, 0.01, 0.05, 0.1, 0.25, 0.5,
+  1, 2, 5, 10, 20, 50, 100
+)
+```
+
+```{r step-024}
+contour_label_levels <- c(1, 5, 10, 50, 100)
+
+contour_label_lines <- contourLines(
+  x = V0.seq,
+  y = sv.seq,
+  z = z,
+  levels = contour_label_levels
+)
+
+contour_label_data <- do.call(
+  rbind,
+  lapply(contour_label_levels, function(level_value) {
+    level_lines <- contour_label_lines[
+      vapply(
+        contour_label_lines,
+        function(line) isTRUE(all.equal(line$level, level_value)),
+        logical(1)
+      )
+    ]
+    longest_line <- level_lines[[which.max(vapply(level_lines, function(line) {
+      length(line$x)
+    }, numeric(1)))]]
+    label_index <- round(length(longest_line$x) * 0.72)
+    data.frame(
+      asset_value = longest_line$x[label_index],
+      asset_volatility = longest_line$y[label_index],
+      objective = level_value
+    )
+  })
+)
+
+contour_label_data$label <- sub(
+  "\\.0$",
+  "",
+  format(contour_label_data$objective, trim = TRUE)
+)
+```
+
+```{r step-025}
+plot_fig_motfacv <- ggplot2::ggplot(contour_data, ggplot2::aes(x = asset_value, y = asset_volatility, z = objective)) +
+  ggplot2::geom_contour(ggplot2::aes(color = ggplot2::after_stat(level)), breaks = contour_breaks,
+    linewidth = 0.75)
+```
+
+### Figure 3.4 {#result-figure-3-4}
+
+```{r figure-3-4}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.4. Minimization of the function: a contour view."
+plot_fig_motfacv +
+  ggplot2::geom_label(data = contour_label_data, ggplot2::aes(x = asset_value, y = asset_volatility,
+    label = label), inherit.aes = FALSE, size = 4, label.size = 0, fill = "white", alpha = 0.85) +
+  ggplot2::geom_vline(xintercept = V0, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_hline(yintercept = sv, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_point(data = solution_surface_data, ggplot2::aes(x = asset_value, y = asset_volatility),
+    inherit.aes = FALSE, shape = 21, size = 4.2, stroke = 1.2, color = "#B22222", fill = "white") +
+  ggplot2::scale_color_viridis_c(option = "C", end = 0.9, trans = "log10", guide = "none") +
+  ggplot2::labs(x = expression(V[0]), y = expression(sigma[V])) +
+  book_figure_theme()
+```
+
+### Figure 3.5 {#result-figure-3-5}
+
+```{r figure-3-5}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.5. Minimization of the function: a three-dimensional view."
+if (TRUE) { # Static view matching the printed figure.
+  saved_par <- par(mar = c(2.4, 2.4, 2.2, 1), mgp = c(1.7, 0.5, 0))
+  persp(
+    x = sv.seq, y = V0.seq, z = t(z),
+    theta = 40, phi = 25, expand = 0.6,
+    col = "#0072B2", border = NA, shade = 0.4,
+    xlab = "Volatility", ylab = "Asset value",
+    zlab = "", ticktype = "detailed", cex.axis = 0.85, cex.lab = 0.85,
+    main = expression("Vertical axis: " * F^2 + G^2), cex.main = 0.9
+  )
+  par(saved_par)
+} else {
+  plot_ly(type = "surface", x = sv.seq, y = V0.seq, z = z) %>%
+    layout(scene = list(
+      xaxis = list(title = "Assets volatility"),
+      yaxis = list(title = "Assets"),
+      zaxis = list(title = "f=F^2+G^2")
+    )) %>%
+    hide_colorbar()
+}
+```
+
+### Table 3.4 {#result-table-3-4}
+
+```{r table-3-4}
+merton_optimization_diagnostic <- data.frame(
+  Diagnostic = c(
+    "Objective value at solution",
+    "Slice in $V_0$",
+    "Slice in $\\sigma_V$",
+    "Contour plot",
+    "Interactive surface"
+  ),
+  `What is checked` = c(
+    "Whether both Hull equation errors are essentially zero at the estimated pair.",
+    "Whether moving only $V_0$ away from the solution increases the objective.",
+    "Whether moving only $\\sigma_V$ away from the solution increases the objective.",
+    "Whether $(\\widehat{V}_0,\\widehat{\\sigma}_V)$ sits in the low-objective region when both variables move.",
+    "Whether the two-dimensional contour view matches the three-dimensional objective surface."
+  ),
+  `Reading in this example` = c(
+    paste0("The rounded objective is ", fmt_num(round(merton_objective_at_solution, 6), 6), "."),
+    "The red point lies near the lowest part of the $V_0$ slice.",
+    "The red point lies near the lowest part of the $\\sigma_V$ slice.",
+    "The estimated pair is inside the innermost low-error region.",
+    "The valley of the objective surface is centered near the estimated pair."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  merton_optimization_diagnostic,
+  caption = "How to read the Merton numerical-solution diagnostics.",
+  escape = FALSE,
+  row.names = FALSE
+)
+```
+
+### Model-implied debt value and spread
+
+```{r step-029}
+market_value_debt <- V0 - E0
+
+pv_promised_payment_debt <- D * exp(-rf * TT)
+
+credit_value_gap <- pv_promised_payment_debt - market_value_debt
+
+implied_loss_rate <- credit_value_gap /
+  pv_promised_payment_debt
+
+implied_lgd <- implied_loss_rate / pd
+
+implied_recovery_rate <- 1 - implied_lgd
+
+reconstructed_debt_value <- pv_promised_payment_debt *
+  (1 - pd * implied_lgd)
+```
+
+### Table 3.5 {#result-table-3-5}
+
+```{r table-3-5}
+debt_summary <- data.frame(
+  Measure = c(
+    "Model-implied market value of debt",
+    "Risk-free present value of the promised payment",
+    "Credit-risk value gap",
+    "Credit-risk value discount",
+    "Risk-neutral probability of default",
+    "Constant-equivalent implied LGD",
+    "Constant-equivalent implied recovery rate",
+    "Debt value reconstructed from PD and implied recovery"
+  ),
+  Value = c(
+    fmt_num(market_value_debt, 4),
+    fmt_num(pv_promised_payment_debt, 4),
+    fmt_num(credit_value_gap, 4),
+    fmt_pct(implied_loss_rate, 4),
+    fmt_pct(pd, 4),
+    fmt_pct(implied_lgd, 4),
+    fmt_pct(implied_recovery_rate, 4),
+    fmt_num(reconstructed_debt_value, 4)
+  )
+)
+
+companion_kable(
+  debt_summary,
+  caption = "Debt measures implied by the fitted Merton model.",
+  row.names = FALSE
+)
+```
+
+### From the debt-value discount to expected recovery
+
+### Expressing debt value as a yield spread
+
+```{r step-031}
+merton_implied_debt_yield <- (1 / TT) * log(D / market_value_debt)
+
+merton_implied_spread <- merton_implied_debt_yield - rf
+```
+
+### Table 3.6 {#result-table-3-6}
+
+```{r table-3-6}
+spread_summary <- data.frame(
+  Measure = c(
+    "Model-implied market value of debt",
+    "Promised debt payment at maturity",
+    "Risk-free rate",
+    "Implied debt yield",
+    "Merton-implied credit spread",
+    "Merton-implied credit spread in basis points"
+  ),
+  Value = c(
+    fmt_num(market_value_debt, 4),
+    fmt_num(D, 4),
+    fmt_pct(rf, 4),
+    fmt_pct(merton_implied_debt_yield, 4),
+    fmt_pct(merton_implied_spread, 4),
+    fmt_num(10000 * merton_implied_spread, 1)
+  )
+)
+
+companion_kable(
+  spread_summary,
+  caption = "Merton-implied bond yield and credit spread.",
+  row.names = FALSE
+)
+```
+
+## 3.2 Risk-neutral asset paths and default at maturity
+
+```{r step-033}
+source("chapters/03-merton/helpers/calibration.R")
+```
+
+```{r step-034}
+V0.sim <- function(i) {  # the argument i is not used here.
+  GBM(N = 365, T = 1, t0 = 0, x0 = V0, theta = rf, sigma = sv) }
+
+set.seed(3) # Reproducibility
+
+paths <- sapply(1:10, V0.sim) # Create 10 paths for V.
+
+final_row <- nrow(paths)
+
+path_time_10 <- seq(0, final_row - 1)
+
+path_data_10 <- data.frame(
+  time_day = rep(path_time_10, times = ncol(paths)),
+  path_id = factor(rep(seq_len(ncol(paths)), each = nrow(paths))),
+  asset_value = as.vector(paths)
+)
+
+terminal_path_data_10 <- data.frame(
+  time_day = max(path_time_10),
+  asset_value = paths[final_row, ],
+  terminal_state = ifelse(paths[final_row, ] < D, "Default", "No default")
+)
+
+initial_path_data_10 <- data.frame(
+  time_day = 0,
+  asset_value = V0
+)
+
+plot_fig_so10pota <- ggplot2::ggplot(path_data_10, ggplot2::aes(x = time_day, y = asset_value, group = path_id)) +
+  ggplot2::geom_line(linewidth = 0.45, color = "black")
+```
+
+### Figure 3.6 {#result-figure-3-6}
+
+```{r figure-3-6}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.6. Ten risk-neutral valuation paths for the firm's assets."
+plot_fig_so10pota +
+  ggplot2::geom_hline(yintercept = D, linewidth = 0.9, color = "#B22222") +
+  ggplot2::geom_point(data = initial_path_data_10, ggplot2::aes(x = time_day, y = asset_value),
+    inherit.aes = FALSE, size = 3, color = "#0072B2") +
+  ggplot2::geom_point(data = terminal_path_data_10, ggplot2::aes(x = time_day, y = asset_value,
+    color = terminal_state), inherit.aes = FALSE, shape = 1, size = 3, stroke = 1.1) +
+  ggplot2::scale_color_manual(values = c(Default = "#B22222", `No default` = "#009E73"), guide = "none") +
+  ggplot2::labs(x = "Time in days (from 0 to T)", y = expression(V[t])) +
+  book_figure_theme()
+```
+
+```{r step-036}
+paths_below_D <- which(colSums(paths < D) > 0)
+
+paths_below_D
+```
+
+```{r step-037}
+make_path_data <- function(path_matrix, path_ids = seq_len(ncol(path_matrix))) {
+  path_matrix <- as.matrix(path_matrix)
+  data.frame(
+    time_day = rep(seq(0, nrow(path_matrix) - 1), times = ncol(path_matrix)),
+    path_id = factor(rep(path_ids, each = nrow(path_matrix)), levels = path_ids),
+    asset_value = as.vector(path_matrix)
+  )
+}
+
+paths_below_D_matrix <- paths[, paths_below_D, drop = FALSE]
+
+paths_below_D_data <- make_path_data(paths_below_D_matrix, paths_below_D)
+
+paths_below_D_data$terminal_state <- rep(
+  ifelse(
+    paths_below_D_matrix[final_row, ] < D,
+    "Default at maturity",
+    "Crosses D before maturity, no default"
+  ),
+  each = nrow(paths_below_D_matrix)
+)
+
+plot_fig_nttbpfdnd <- ggplot2::ggplot(paths_below_D_data, ggplot2::aes(x = time_day, y = asset_value, group = path_id,
+    color = terminal_state)) +
+  ggplot2::geom_line(linewidth = 0.9)
+```
+
+### Figure 3.7 {#result-figure-3-7}
+
+```{r figure-3-7}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.7. Paths that cross below D before maturity; only paths ending below D default."
+plot_fig_nttbpfdnd +
+  ggplot2::geom_hline(yintercept = D, linewidth = 0.9, color = "#B22222") +
+  ggplot2::geom_point(data = data.frame(time_day = 0, asset_value = V0), ggplot2::aes(x = time_day,
+    y = asset_value), inherit.aes = FALSE, size = 3, color = "#0072B2") +
+  ggplot2::scale_color_manual(values = c(`Crosses D before maturity, no default` = "#0072B2",
+    `Default at maturity` = "#B22222"), guide = "none") +
+  ggplot2::labs(x = "Time in days (from 0 to T)", y = expression(V[t])) +
+  book_figure_theme()
+```
+
+```{r step-039}
+sim_pd_10 <- sum(paths[final_row, ] < D) / ncol(paths)
+```
+
+### Table 3.7 {#result-table-3-7}
+
+```{r table-3-7}
+companion_kable(
+  data.frame(
+    Quantity = c(
+      "Simulated default paths",
+      "Total simulated paths",
+      "Simulated risk-neutral PD",
+      "Analytical Merton PD"
+    ),
+    Value = c(
+      fmt_int(sum(paths[final_row, ] < D)),
+      fmt_int(ncol(paths)),
+      fmt_pct(sim_pd_10, 0),
+      fmt_pct(pd_merton, 4)
+    )
+  ),
+  caption = "Default count and simulated risk-neutral PD with 10 paths.",
+  row.names = FALSE
+)
+```
+
+```{r step-041}
+set.seed(3) # Reproducibility
+
+paths <- sapply(1:100, V0.sim) # Create 100 paths.
+
+final_row <- nrow(paths)
+
+path_data_100 <- make_path_data(paths)
+
+plot_fig_so100pota <- ggplot2::ggplot(path_data_100, ggplot2::aes(x = time_day, y = asset_value, group = path_id)) +
+  ggplot2::geom_line(linewidth = 0.25, color = "gray35", alpha = 0.55)
+```
+
+### Figure 3.8 {#result-figure-3-8}
+
+```{r figure-3-8}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.8. One hundred risk-neutral valuation paths for the firm's assets."
+plot_fig_so100pota +
+  ggplot2::geom_hline(yintercept = D, linewidth = 0.9, color = "#B22222") +
+  ggplot2::geom_point(data = data.frame(time_day = 0, asset_value = V0), ggplot2::aes(x = time_day,
+    y = asset_value), inherit.aes = FALSE, size = 3, color = "#0072B2") +
+  ggplot2::labs(x = "Time in days (from 0 to T)", y = expression(V[t])) +
+  book_figure_theme()
+```
+
+```{r step-043}
+sim_pd_100 <- sum(paths[final_row, ] < D) / ncol(paths)
+```
+
+### Table 3.8 {#result-table-3-8}
+
+```{r table-3-8}
+companion_kable(
+  data.frame(
+    Quantity = c(
+      "Simulated default paths",
+      "Total simulated paths",
+      "Simulated risk-neutral PD",
+      "Analytical Merton PD"
+    ),
+    Value = c(
+      fmt_int(sum(paths[final_row, ] < D)),
+      fmt_int(ncol(paths)),
+      fmt_pct(sim_pd_100, 0),
+      fmt_pct(pd_merton, 4)
+    )
+  ),
+  caption = "Default count and simulated risk-neutral PD with 100 paths.",
+  row.names = FALSE
+)
+```
+
+```{r step-045}
+default_cases_100 <- which(paths[final_row, ] < D)
+
+default_path_data_100 <- make_path_data(
+  paths[, default_cases_100, drop = FALSE],
+  default_cases_100
+)
+
+plot_fig_dc <- ggplot2::ggplot(default_path_data_100, ggplot2::aes(x = time_day, y = asset_value, group = path_id)) +
+  ggplot2::geom_line(linewidth = 0.45, color = "gray25", alpha = 0.75)
+```
+
+### Figure 3.9 {#result-figure-3-9}
+
+```{r figure-3-9}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.9. Paths that end below the promised debt payment at maturity."
+plot_fig_dc +
+  ggplot2::geom_hline(yintercept = D, linewidth = 0.9, color = "#B22222") +
+  ggplot2::geom_point(data = data.frame(time_day = 0, asset_value = V0), ggplot2::aes(x = time_day,
+    y = asset_value), inherit.aes = FALSE, size = 3, color = "#0072B2") +
+  ggplot2::labs(x = "Time in days (from 0 to T)", y = expression(V[t])) +
+  book_figure_theme()
+```
+
+```{r step-047}
+almost_default <- which(colSums(paths < D) > 0)
+
+default <- which(paths[final_row, ] < D)
+
+almost_default_no_default <- setdiff(almost_default, default)
+```
+
+```{r step-048}
+almost_default_no_default_data <- make_path_data(
+  paths[, almost_default_no_default, drop = FALSE],
+  almost_default_no_default
+)
+
+almost_default_colors <- grDevices::hcl.colors(
+  length(almost_default_no_default),
+  "Dark 3"
+)
+
+names(almost_default_colors) <- levels(almost_default_no_default_data$path_id)
+
+plot_fig_atpwl1asp <- ggplot2::ggplot(almost_default_no_default_data, ggplot2::aes(x = time_day, y = asset_value,
+    group = path_id, color = path_id)) +
+  ggplot2::geom_line(linewidth = 0.35, alpha = 0.9)
+```
+
+### Figure 3.10 {#result-figure-3-10}
+
+```{r figure-3-10}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.10. These paths cross below $D$ before maturity, but finish with $V_T$ above $D$ and therefore do not default."
+plot_fig_atpwl1asp +
+  ggplot2::geom_hline(yintercept = D, linewidth = 0.9, color = "#B22222") +
+  ggplot2::geom_point(data = data.frame(time_day = 0, asset_value = V0), ggplot2::aes(x = time_day,
+    y = asset_value), inherit.aes = FALSE, size = 3, color = "#0072B2") +
+  ggplot2::scale_color_manual(values = almost_default_colors, guide = "none") +
+  ggplot2::labs(x = "Time in days (from 0 to T)", y = expression(V[t])) +
+  book_figure_theme()
+```
+
+### An optional connection to continuous time
+
+```{r step-050}
+gbm_delta <- 1 / 365
+gbm_example_z <- -1
+gbm_example_value <- V0 * exp(
+  (rf - sv^2 / 2) * gbm_delta +
+    sv * sqrt(gbm_delta) * gbm_example_z
+)
+gbm_example_value
+```
+
+```{r step-051}
+gbm_grid_check <- do.call(rbind, lapply(c(1, 4, 12, 365), function(n) {
+  rows <- unique(round(seq(1, nrow(paths), length.out = n + 1)))
+  data.frame(
+    intervals = n,
+    observed_below_debt = sum(colSums(paths[rows, , drop = FALSE] < D) > 0),
+    defaults_at_maturity = sum(paths[nrow(paths), ] < D)
+  )
+}))
+```
+
+### Table 3.9 {#result-table-3-9}
+
+```{r table-3-9}
+companion_kable(gbm_grid_check, col.names = c(
+  "Observation intervals", "Paths observed below debt", "Defaults at maturity"
+), caption = "Observing the same 100 asset paths at different frequencies.")
+```
+
+### Checking Monte Carlo convergence
+
+```{r step-053}
+simulate_terminal_assets <- function(n) {
+  exp(rnorm(n, log(V0) + (rf - (sv^2) / 2) * TT, sv * sqrt(TT)))
+}
+
+set.seed(13)
+
+convergence_sizes <- c(100, 1000, 10000)
+
+convergence_labels <- paste0(
+  "N = ",
+  format(convergence_sizes, big.mark = ",", scientific = FALSE)
+)
+
+VT_convergence <- lapply(convergence_sizes, simulate_terminal_assets)
+
+names(VT_convergence) <- convergence_labels
+
+vt_convergence_data <- do.call(
+  rbind,
+  lapply(names(VT_convergence), function(sample_label) {
+    values <- VT_convergence[[sample_label]]
+    data.frame(
+      sample_label = sample_label,
+      terminal_asset_value = values,
+      region = ifelse(values < D, "Default region", "No default region")
+    )
+  })
+)
+
+vt_convergence_data$sample_label <- factor(
+  vt_convergence_data$sample_label,
+  levels = convergence_labels
+)
+
+convergence_pd_data <- do.call(
+  rbind,
+  lapply(names(VT_convergence), function(sample_label) {
+    values <- VT_convergence[[sample_label]]
+    data.frame(
+      sample_label = sample_label,
+      x = 17.6,
+      y = 380,
+      label = paste0(
+        "Sim: ", fmt_pct(mean(values < D), 1), "\n",
+        "Merton: ", fmt_pct(pd_merton, 1)
+      )
+    )
+  })
+)
+
+convergence_pd_data$sample_label <- factor(
+  convergence_pd_data$sample_label,
+  levels = convergence_labels
+)
+
+plot_fig_vt_convergence_hists <- ggplot2::ggplot(vt_convergence_data, ggplot2::aes(x = terminal_asset_value, fill = region)) +
+  ggplot2::geom_histogram(binwidth = 0.25, boundary = D, color = "white", linewidth = 0.1)
+```
+
+### Figure 3.11 {#result-figure-3-11}
+
+```{r figure-3-11}
+#| fig-width: 5.5
+#| fig-height: 6.2
+#| fig-cap: "Figure 3.11. Convergence of the simulated risk-neutral probability of default to the analytical Merton probability."
+plot_fig_vt_convergence_hists +
+  ggplot2::geom_vline(xintercept = D, linetype = "dashed", linewidth = 0.65) +
+  ggplot2::geom_text(data = convergence_pd_data, ggplot2::aes(x = x, y = y, label = label),
+    inherit.aes = FALSE, hjust = 0, vjust = 1, size = 2.9, lineheight = 0.95) +
+  ggplot2::facet_wrap(~sample_label, ncol = 1) +
+  ggplot2::coord_cartesian(xlim = c(4, 30), ylim = c(0, 400), expand = FALSE) +
+  ggplot2::scale_fill_manual(values = c(`Default region` = "#B22222", `No default region` = "#0072B2"),
+    guide = "none") +
+  ggplot2::labs(x = "Value of the assets at maturity", y = "Frequency") +
+  book_figure_theme() +
+  ggplot2::theme(strip.background = ggplot2::element_blank(), strip.text = ggplot2::element_text(face = "bold"))
+```
+
+```{r step-055}
+set.seed(13)
+
+VT <- exp(rnorm(100000, log(V0) + (rf - (sv^2) / 2)*TT, sv*sqrt(TT)))
+
+h <- hist(VT, 100, plot = FALSE)
+
+hist_data <- data.frame(
+  xmin = head(h$breaks, -1),
+  xmax = tail(h$breaks, -1),
+  count = h$counts
+)
+
+hist_data$region <- ifelse(hist_data$xmin < D, "Default region", "No default region")
+
+sim_pd_100k <- mean(VT < D)
+```
+
+```{r step-056}
+hist_label_x <- 18.4
+
+hist_label_y <- max(hist_data$count) * 0.92
+
+hist_label_gap <- max(hist_data$count) * 0.075
+
+hist_merton_label <- paste0(
+  "paste('Merton ', N(-d[2]), ' = ", fmt_pct(pd_merton, 4), "')"
+)
+```
+
+```{r step-057}
+plot_fig_ho1votaam <- ggplot2::ggplot(hist_data) +
+  ggplot2::geom_rect(ggplot2::aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = count, fill = region),
+    color = "white", linewidth = 0.1)
+```
+
+### Figure 3.12 {#result-figure-3-12}
+
+```{r figure-3-12}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.12. Histogram of 100,000 values of the assets at maturity."
+plot_fig_ho1votaam +
+  ggplot2::geom_vline(xintercept = D, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::annotate("text", x = hist_label_x, y = hist_label_y, hjust = 0, vjust = 1, label = paste0("Red area = ",
+    fmt_pct(sim_pd_100k, 3)), size = 3.2) +
+  ggplot2::annotate("text", x = hist_label_x, y = hist_label_y - hist_label_gap, hjust = 0,
+    vjust = 1, label = "Simulated risk-neutral PD", size = 3.2) +
+  ggplot2::annotate("text", x = hist_label_x, y = hist_label_y - 2 * hist_label_gap, hjust = 0,
+    vjust = 1, label = hist_merton_label, parse = TRUE, size = 3.2) +
+  ggplot2::annotate("text", x = hist_label_x, y = hist_label_y - 3 * hist_label_gap, hjust = 0,
+    vjust = 1, label = "The two values are close.", size = 3.2) +
+  ggplot2::coord_cartesian(xlim = c(4, 30), expand = FALSE) +
+  ggplot2::scale_fill_manual(values = c(`Default region` = "#B22222", `No default region` = "#0072B2"),
+    guide = "none") +
+  ggplot2::labs(x = "Value of the assets at maturity", y = "Frequency") +
+  book_figure_theme()
+```
+
+### Table 3.10 {#result-table-3-10}
+
+```{r table-3-10}
+companion_kable(
+  data.frame(
+    Quantity = c(
+      "Simulated terminal asset values",
+      "Terminal values below D",
+      "Simulated risk-neutral PD",
+      "Analytical Merton PD"
+    ),
+    Value = c(
+      fmt_int(length(VT)),
+      fmt_int(sum(VT < D)),
+      fmt_pct(sim_pd_100k, 4),
+      fmt_pct(pd_merton, 4)
+    )
+  ),
+  caption = "Large-sample simulated risk-neutral PD compared with the analytical Merton PD.",
+  row.names = FALSE
+)
+```
+
+## 3.3 Equity as a call option payoff
+
+### Table 3.11 {#result-table-3-11}
+
+```{r table-3-11}
+mapping <- data.frame(
+  V1 = c("Underlying price at maturity, $S_T$", "Strike price, $K$", "Call is in the money if $S_T>K$", "Call expires worthless if $S_T<K$", "Call payoff, $\\max(S_T-K,0)$"),
+  V2 = c("Market value of assets at maturity, $V_T$", "Promised debt payment due at maturity, $D$", "Equity receives a positive residual if $V_T>D$", "Equity is zero and the firm defaults if $V_T<D$", "Equity payoff, $\\max(V_T-D,0)$")
+)
+companion_kable(mapping, col.names = c("European call option", "Merton market-value claim"),
+  caption = "Correspondence between a European call and Merton equity.", escape = FALSE)
+```
+
+```{r step-060}
+ET <- pmax(VT - D, 0) # payoff function of a typical call option.
+
+payoff_data <- data.frame(
+  terminal_asset_value = sort(VT),
+  terminal_equity_value = sort(ET)
+)
+
+plot_fig_avotfbssitf <- ggplot2::ggplot(payoff_data, ggplot2::aes(x = terminal_asset_value, y = terminal_equity_value)) +
+  ggplot2::geom_hline(yintercept = 0, linewidth = 0.35, color = "gray78") +
+  ggplot2::geom_line(linewidth = 0.8, color = "#0072B2")
+```
+
+### Figure 3.13 {#result-figure-3-13}
+
+```{r figure-3-13}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.13. Equity at maturity as a European call payoff on the firm's assets."
+plot_fig_avotfbssitf +
+  ggplot2::geom_vline(xintercept = D, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::annotate("label", x = 6.1, y = 4.4, hjust = 0, label = paste0("Equity payoff is zero\n",
+    "in ", fmt_pct(sim_pd_100k, 3), " of the\n", "100,000 cases."), label.size = 0, linewidth = 0,
+    fill = "white", alpha = 0.9, size = 3.8) +
+  ggplot2::coord_cartesian(xlim = c(5, 20), ylim = c(-0.55, 10), expand = FALSE) +
+  ggplot2::labs(x = expression(paste("Simulated assets at maturity (", V[T], ")")), y = expression(paste("Simulated equity at maturity (",
+    E[T], ")"))) +
+  book_figure_theme()
+```
+
+## 3.4 Model-implied PD sensitivity analyses
+
+```{r step-062}
+source("chapters/03-merton/helpers/pd.R")
+```
+
+```{r step-063}
+pd <- function(E0, se, rf, TT, D) {
+  d1_merton <- function(V0, sv) {
+    (log(V0 / D) + (rf + sv^2 / 2) * TT) / (sv * sqrt(TT))
+  }
+
+  d2_merton <- function(V0, sv) {
+    d1_merton(V0, sv) - sv * sqrt(TT)
+  }
+
+  equity_value_error <- function(V0, sv) {
+    V0 * pnorm(d1_merton(V0, sv)) -
+      D * exp(-rf * TT) * pnorm(d2_merton(V0, sv)) -
+      E0
+  }
+
+  equity_volatility_error <- function(V0, sv) {
+    pnorm(d1_merton(V0, sv)) * sv * V0 - se * E0
+  }
+
+  objective <- function(x) {
+    equity_value_error(x[1], x[2])^2 + equity_volatility_error(x[1], x[2])^2
+  }
+
+  start_V0 <- E0 + D * exp(-rf * TT)
+  start_sv <- se * E0 / start_V0
+
+  solution <- optim(
+    par = c(V0 = start_V0, sv = start_sv),
+    fn = objective,
+    method = "L-BFGS-B",
+    lower = c(V0 = 1e-6, sv = 1e-6),
+    control = list(
+      parscale = c(V0 = 10, sv = 0.2),
+      ndeps = c(V0 = 1e-6, sv = 1e-8)
+    )
+  )
+
+  V0_hat <- unname(solution$par["V0"])
+  sv_hat <- unname(solution$par["sv"])
+
+  pnorm(-d2_merton(V0_hat, sv_hat))
+}
+```
+
+```{r step-064}
+pd1 <- pd(3, 0.8, 0.05, 1, 10)
+```
+
+### Table 3.12 {#result-table-3-12}
+
+```{r table-3-12}
+companion_kable(
+  data.frame(
+    Quantity = c(
+      "Observed equity value",
+      "Observed equity volatility",
+      "Risk-free rate",
+      "Debt maturity",
+      "Promised debt payment",
+      "Merton risk-neutral PD"
+    ),
+    Value = c(
+      fmt_num(E0, 0),
+      fmt_pct(se, 0),
+      fmt_pct(rf, 0),
+      fmt_num(TT, 0),
+      fmt_num(D, 0),
+      fmt_pct(pd1, 4)
+    )
+  ),
+  caption = "Original Hull/Merton input position for the sensitivity analysis.",
+  row.names = FALSE
+)
+```
+
+```{r step-066}
+l = 50 # Vectors of length 50.
+
+x.E <- seq(from = 1, to = 20, length.out = l)
+
+x.rf <- seq(0, 0.20, length.out = l)
+
+x.D <- seq(1, 20, length.out = l)
+
+x.T <- seq(0.5, 20, length.out = l)
+
+x.se <- seq(0.01, 3, length.out = l)
+
+pd.E <- mapply(pd, x.E, se, rf, TT, D)
+
+pd.rf <- mapply(pd, E0, se, x.rf, TT, D)
+
+pd.D <- mapply(pd, E0, se, rf, TT, x.D)
+
+pd.T <- mapply(pd, E0, se, rf, x.T, D)
+
+pd.se <- mapply(pd, E0, x.se, rf, TT, D)
+
+source("chapters/03-merton/helpers/figures.R", local = TRUE)
+```
+
+### One-input sensitivity curves
+
+### Figure 3.14 {#result-figure-3-14}
+
+```{r figure-3-14}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.14. The risk-neutral probability of default as a function of the equity at time zero."
+plot_pd_sensitivity(
+  x = x.E,
+  y = pd.E,
+  current_x = E0,
+  x_label = "Equity at time zero",
+  y_limits = c(0, 0.15)
+)
+```
+
+### Figure 3.15 {#result-figure-3-15}
+
+```{r figure-3-15}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.15. The risk-neutral probability of default as a function of the risk-free rate."
+plot_pd_sensitivity(
+  x = x.rf,
+  y = pd.rf,
+  current_x = rf,
+  x_label = "Risk-free rate",
+  y_limits = range(pd.rf) + c(-0.0006, 0.0006),
+  x_as_percent = TRUE,
+  y_digits = 1
+)
+```
+
+### Figure 3.16 {#result-figure-3-16}
+
+```{r figure-3-16}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.16. The risk-neutral probability of default as a function of the promised debt payment due at maturity."
+plot_pd_sensitivity(
+  x = x.D,
+  y = pd.D,
+  current_x = D,
+  x_label = "Promised debt payment at maturity",
+  y_limits = c(0, 0.15)
+)
+```
+
+### Figure 3.17 {#result-figure-3-17}
+
+```{r figure-3-17}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.17. The risk-neutral probability of default as a function of debt maturity."
+plot_pd_sensitivity(
+  x = x.T,
+  y = pd.T,
+  current_x = TT,
+  x_label = "Maturity"
+)
+```
+
+### Figure 3.18 {#result-figure-3-18}
+
+```{r figure-3-18}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.18. The risk-neutral probability of default as a function of the volatility of the equity."
+plot_pd_sensitivity(
+  x = x.se,
+  y = pd.se,
+  current_x = se,
+  x_label = "Equity volatility",
+  x_as_percent = TRUE
+)
+```
+
+```{r step-072}
+sensitivity_summary_table <- data.frame(
+  Input = c(
+    "$E_0$",
+    "$r_f$",
+    "$D$",
+    "$T$",
+    "$\\sigma_E$"
+  ),
+  `Grid range` = c(
+    paste0(fmt_num(min(x.E), 0), " to ", fmt_num(max(x.E), 0)),
+    paste0(fmt_pct(min(x.rf), 0), " to ", fmt_pct(max(x.rf), 0)),
+    paste0(fmt_num(min(x.D), 0), " to ", fmt_num(max(x.D), 0)),
+    paste0(fmt_num(min(x.T), 1), " to ", fmt_num(max(x.T), 0), " years"),
+    paste0(fmt_pct(min(x.se), 0), " to ", fmt_pct(max(x.se), 0))
+  ),
+  `PD range on grid` = c(
+    paste0(fmt_pct(min(pd.E, na.rm = TRUE), 2), " to ", fmt_pct(max(pd.E, na.rm = TRUE), 2)),
+    paste0(fmt_pct(min(pd.rf, na.rm = TRUE), 2), " to ", fmt_pct(max(pd.rf, na.rm = TRUE), 2)),
+    paste0(fmt_pct(min(pd.D, na.rm = TRUE), 2), " to ", fmt_pct(max(pd.D, na.rm = TRUE), 2)),
+    paste0(fmt_pct(min(pd.T, na.rm = TRUE), 2), " to ", fmt_pct(max(pd.T, na.rm = TRUE), 2)),
+    paste0(fmt_pct(min(pd.se, na.rm = TRUE), 2), " to ", fmt_pct(max(pd.se, na.rm = TRUE), 2))
+  ),
+  `Financial reading` = c(
+    "More equity market value gives the firm a larger cushion above the promised debt payment.",
+    "The effect is small in this example because the option valuation equation and asset re-estimation both move.",
+    "A higher promised debt payment raises the default boundary.",
+    "More time gives the asset value more room to move under the risk-neutral distribution.",
+    "Higher observed equity volatility implies a more unstable residual claim and usually higher asset risk."
+  )
+)
+```
+
+### Table 3.13 {#result-table-3-13}
+
+```{r table-3-13}
+companion_kable(
+  sensitivity_summary_table,
+  caption = "Reading the one-input Merton sensitivity curves.",
+  escape = FALSE,
+  row.names = FALSE
+)
+```
+
+### Two-input views
+
+```{r step-074}
+x.E_two_input <- seq(from = 1, to = 10, length.out = l)
+
+x.se_two_input <- seq(from = 0.01, to = 1.5, length.out = l)
+
+p_E_se <- matrix(0, nrow = l, ncol = l)
+
+for(i in 1 : l){
+  for(j in 1 : l){
+    p_E_se[i,j] <- mapply(pd, x.E_two_input[i], x.se_two_input[j], rf, TT, D) } }
+```
+
+```{r step-075}
+pd_grid <- expand.grid(
+  equity_at_time_zero = x.E_two_input,
+  equity_volatility = x.se_two_input
+)
+
+pd_grid$risk_neutral_pd <- as.vector(p_E_se)
+
+current_pd_point <- data.frame(
+  equity_at_time_zero = E0,
+  equity_volatility = se,
+  risk_neutral_pd = pd1
+)
+
+pd_contour_breaks <- seq(0.05, 0.95, by = 0.05)
+```
+
+```{r step-076}
+pd_contour_label_levels <- c(0.05, 0.10, 0.15, 0.20, 0.40)
+
+pd_contour_label_lines <- contourLines(
+  x = x.E_two_input,
+  y = x.se_two_input,
+  z = p_E_se,
+  levels = pd_contour_label_levels
+)
+
+pd_contour_label_list <- lapply(pd_contour_label_levels, function(level_value) {
+  level_lines <- pd_contour_label_lines[
+    vapply(
+      pd_contour_label_lines,
+      function(line) isTRUE(all.equal(line$level, level_value)),
+      logical(1)
+    )
+  ]
+  if (length(level_lines) == 0) {
+    return(NULL)
+  }
+  longest_line <- level_lines[[which.max(vapply(level_lines, function(line) {
+    length(line$x)
+  }, numeric(1)))]]
+  label_index <- max(1, round(length(longest_line$x) * 0.68))
+  data.frame(
+    equity_at_time_zero = longest_line$x[label_index],
+    equity_volatility = longest_line$y[label_index],
+    risk_neutral_pd = level_value
+  )
+})
+
+pd_contour_label_data <- do.call(rbind, pd_contour_label_list)
+```
+
+```{r step-077}
+if (is.null(pd_contour_label_data)) {
+  pd_contour_label_data <- data.frame(
+    equity_at_time_zero = numeric(),
+    equity_volatility = numeric(),
+    risk_neutral_pd = numeric()
+  )
+}
+```
+
+```{r step-078}
+pd_contour_label_data$label <- fmt_pct(
+  pd_contour_label_data$risk_neutral_pd,
+  0
+)
+```
+
+```{r step-079}
+plot_fig_tpodaafoteatzatvoeacv <- ggplot2::ggplot(pd_grid, ggplot2::aes(x = equity_at_time_zero, y = equity_volatility,
+    z = risk_neutral_pd)) +
+  ggplot2::geom_contour(ggplot2::aes(color = ggplot2::after_stat(level)), breaks = pd_contour_breaks,
+    linewidth = 0.85)
+```
+
+### Figure 3.19 {#result-figure-3-19}
+
+```{r figure-3-19}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.19. A contour view of the risk-neutral probability of default as a function of equity value and equity volatility."
+plot_fig_tpodaafoteatzatvoeacv +
+  ggplot2::geom_label(data = pd_contour_label_data, ggplot2::aes(x = equity_at_time_zero,
+    y = equity_volatility, label = label), inherit.aes = FALSE, size = 4, label.size = 0,
+    fill = "white", alpha = 0.86) +
+  ggplot2::geom_vline(xintercept = E0, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_hline(yintercept = se, linetype = "dashed", linewidth = 0.35) +
+  ggplot2::geom_point(data = current_pd_point, ggplot2::aes(x = equity_at_time_zero, y = equity_volatility),
+    inherit.aes = FALSE, shape = 21, size = 4.2, stroke = 1.2, color = "#B22222", fill = "white") +
+  ggplot2::scale_y_continuous(labels = function(x) fmt_pct(x, 0),
+    breaks = seq(0.4, 1.2, by = 0.2), expand = ggplot2::expansion(mult = c(0, 0))) +
+  ggplot2::scale_x_continuous(limits = c(1, 10), breaks = seq(2, 10, by = 2), expand = ggplot2::expansion(mult = c(0,
+    0))) +
+  ggplot2::scale_color_viridis_c(option = "C", end = 0.9, guide = "none") +
+  ggplot2::coord_cartesian(ylim = c(0.4, 1.2)) +
+  ggplot2::labs(x = expression(E[0]), y = expression(sigma[E])) +
+  book_figure_theme()
+```
+
+```{r step-081}
+l = 40 # Vectors of length 40.
+
+x.E <- seq(from = 2, to = 4, length.out = l)
+
+x.se <- seq(0.2, 1.5, length.out = l)
+
+p_E_se <- matrix(0, nrow = l, ncol = l)
+
+for(i in 1 : l){
+  for(j in 1 : l){
+    p_E_se[i,j] <- mapply(pd, x.E[i], x.se[j], rf, TT, D) } }
+```
+
+### Figure 3.20 {#result-figure-3-20}
+
+```{r figure-3-20}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.20. The risk-neutral probability of default as a function of equity value and equity volatility: a three-dimensional view."
+if (TRUE) { # Static view matching the printed figure.
+  saved_par <- par(mar = c(2.4, 2.4, 2.2, 1), mgp = c(1.7, 0.5, 0))
+  persp(
+    x = x.se, y = x.E, z = t(p_E_se),
+    theta = 40, phi = 25, expand = 0.6,
+    col = "#0072B2", border = NA, shade = 0.4,
+    xlab = "Volatility", ylab = "Equity value",
+    zlab = "", ticktype = "detailed", cex.axis = 0.85, cex.lab = 0.85,
+    main = "Vertical axis: risk-neutral PD", cex.main = 0.9
+  )
+  par(saved_par)
+} else {
+  plot_ly(type = "surface", x = x.se, y = x.E, z = p_E_se) %>%
+    layout(scene = list(
+      xaxis = list(title = "Volatility of equity"),
+      yaxis = list(title = "Market value of equity"),
+      zaxis = list(title = "Risk-neutral PD")
+    )) %>%
+    hide_colorbar()
+}
+```
+
+## 3.5 Capital-structure scenarios
+
+```{r step-083}
+source("chapters/03-merton/helpers/pd.R")
+```
+
+### Scenario 1. Reduce debt or inject equity
+
+```{r step-084}
+D.seq <- seq(from = 0.1, to = 13, by = 0.1)
+pd_initial <- pd1
+pd_scenario_2_initial <- pd(2, se, rf, TT, 2)
+pd_scenario_3_initial <- pd(E0, se, rf, 1.5, 6)
+scenario1_reduce_D <- pd(E0, se, rf, TT, D - 2)
+scenario1_raise_E <- pd(E0 + 2, se, rf, TT, D)
+scenario2_E0 <- 2
+scenario2_D <- 2
+scenario2_reduce_D <- pd(scenario2_E0, se, rf, TT, scenario2_D - 1)
+scenario2_raise_E <- pd(scenario2_E0 + 1, se, rf, TT, scenario2_D)
+scenario3_T <- 1.5
+scenario3_D <- 6
+scenario3_more_debt <- pd(E0, se, rf, scenario3_T, scenario3_D + 2)
+scenario3_more_time <- pd(E0, se, rf, scenario3_T + 0.5, scenario3_D)
+E1 <- mapply(pd, 1, se, rf, TT, D.seq)
+E2 <- mapply(pd, 2, se, rf, TT, D.seq)
+E3 <- mapply(pd, 3, se, rf, TT, D.seq)
+E4 <- mapply(pd, 4, se, rf, TT, D.seq)
+E5 <- mapply(pd, 5, se, rf, TT, D.seq)
+colors <- c("#009E73", "#7A5195", "black", "#0072B2", "#B22222")
+make_capital_structure_data <- function(x, curves) {
+  data.frame(
+    promised_debt = rep(x, times = length(curves)),
+    curve = factor(
+      rep(names(curves), each = length(x)),
+      levels = names(curves)
+    ),
+    risk_neutral_pd = unlist(curves, use.names = FALSE)
+  )
+}
+source("chapters/03-merton/helpers/figures.R", local = TRUE)
+```
+
+```{r step-085}
+capital_structure_summary <- data.frame(
+  Scenario = c(
+    "1. Initial Hull position",
+    "2. Lower-equity/lower-debt position",
+    "3. Liquidity and maturity choice"
+  ),
+  `Initial position` = c(
+    paste0("$E_0 = ", fmt_num(E0, 0), "$, $D = ", fmt_num(D, 0), "$, $T = ", fmt_num(TT, 0), "$"),
+    paste0("$E_0 = ", fmt_num(scenario2_E0, 0), "$, $D = ", fmt_num(scenario2_D, 0), "$, $T = ", fmt_num(TT, 0), "$"),
+    paste0("$E_0 = ", fmt_num(E0, 0), "$, $D = ", fmt_num(scenario3_D, 0), "$, $T = ", fmt_num(scenario3_T, 1), "$")
+  ),
+  `Initial risk-neutral PD` = c(
+    fmt_pct(pd_initial, 2),
+    fmt_pct(pd_scenario_2_initial, 2),
+    fmt_pct(pd_scenario_3_initial, 2)
+  ),
+  `Action A` = c(
+    paste0("Reduce $D$ to ", fmt_num(D - 2, 0)),
+    paste0("Reduce $D$ to ", fmt_num(scenario2_D - 1, 0)),
+    paste0("Raise $D$ to ", fmt_num(scenario3_D + 2, 0))
+  ),
+  `Risk-neutral PD after A` = c(
+    fmt_pct(scenario1_reduce_D, 2),
+    fmt_pct(scenario2_reduce_D, 2),
+    fmt_pct(scenario3_more_debt, 2)
+  ),
+  `Action B` = c(
+    paste0("Raise $E_0$ to ", fmt_num(E0 + 2, 0)),
+    paste0("Raise $E_0$ to ", fmt_num(scenario2_E0 + 1, 0)),
+    paste0("Extend $T$ to ", fmt_num(scenario3_T + 0.5, 1))
+  ),
+  `Risk-neutral PD after B` = c(
+    fmt_pct(scenario1_raise_E, 2),
+    fmt_pct(scenario2_raise_E, 2),
+    fmt_pct(scenario3_more_time, 2)
+  ),
+  `Lower-PD alternative` = c(
+    "Action B, equity injection",
+    "Action A, debt reduction",
+    "Action A, higher promised payment"
+  ),
+  check.names = FALSE
+)
+```
+
+### Table 3.14 {#result-table-3-14}
+
+```{r table-3-14}
+companion_kable(
+  capital_structure_summary,
+  caption = "Capital-structure scenario summary under the Merton model.",
+  escape = FALSE,
+  row.names = FALSE
+)
+```
+
+```{r step-087}
+leg <- c("E0=1", "E0=2", "E0=3 (initial value)", "E0=4", "E0=5")
+
+names(colors) <- leg
+
+equity_curve_data <- make_capital_structure_data(
+  D.seq,
+  setNames(list(E1, E2, E3, E4, E5), leg)
+)
+```
+
+### Figure 3.21 {#result-figure-3-21}
+
+```{r figure-3-21}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.21. Initial capital-structure position and Merton risk-neutral PD."
+plot_capital_structure(
+  curve_data = equity_curve_data,
+  color_values = colors,
+  x_label = paste0("Promised debt payment. Initially, D=", fmt_num(D, 0)),
+  y_label = paste0("Risk-neutral PD. Initially PD=", fmt_pct(pd_initial, 2)),
+  v_lines = D,
+  h_lines = pd_initial,
+  points_data = data.frame(
+    promised_debt = D,
+    risk_neutral_pd = pd_initial,
+    point_fill = "black"
+  )
+)
+```
+
+### Figure 3.22 {#result-figure-3-22}
+
+```{r figure-3-22}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.22. Debt reduction versus equity injection from the initial position."
+plot_capital_structure(
+  curve_data = equity_curve_data,
+  color_values = colors,
+  x_label = paste0("Promised debt payment. Initially, D=", fmt_num(D, 0)),
+  y_label = paste0("Risk-neutral PD. Initially PD=", fmt_pct(pd_initial, 2)),
+  v_lines = c(D, D - 2),
+  h_lines = c(pd_initial, scenario1_reduce_D, scenario1_raise_E),
+  points_data = data.frame(
+    promised_debt = c(D, D, D - 2),
+    risk_neutral_pd = c(pd_initial, scenario1_raise_E, scenario1_reduce_D),
+    point_fill = c("black", "#B22222", "yellow")
+  )
+)
+```
+
+### Scenario 2. A different starting balance sheet
+
+```{r step-090}
+leg2 <- c("E0=1", "E0=2 (initial value)", "E0=3", "E0=4", "E0=5")
+
+scenario2_colors <- setNames(unname(colors), leg2)
+
+scenario2_curve_data <- make_capital_structure_data(
+  D.seq,
+  setNames(list(E1, E2, E3, E4, E5), leg2)
+)
+```
+
+### Figure 3.23 {#result-figure-3-23}
+
+```{r figure-3-23}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.23. Alternative starting balance sheet and Merton risk-neutral PD."
+plot_capital_structure(
+  curve_data = scenario2_curve_data,
+  color_values = scenario2_colors,
+  x_label = paste0(
+    "Promised debt payment. Initially, D=",
+    fmt_num(scenario2_D, 0)
+  ),
+  y_label = paste0(
+    "Risk-neutral PD. Initially PD=",
+    fmt_pct(pd_scenario_2_initial, 2)
+  ),
+  v_lines = scenario2_D,
+  h_lines = pd_scenario_2_initial,
+  points_data = data.frame(
+    promised_debt = scenario2_D,
+    risk_neutral_pd = pd_scenario_2_initial,
+    point_fill = "#7A5195"
+  ),
+  x_limits = c(0, 2.5),
+  y_limits = c(0, 0.08),
+  legend_text_size = 8
+)
+```
+
+### Figure 3.24 {#result-figure-3-24}
+
+```{r figure-3-24}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.24. Debt reduction versus equity injection from the alternative balance sheet."
+plot_capital_structure(
+  curve_data = scenario2_curve_data,
+  color_values = scenario2_colors,
+  x_label = paste0(
+    "Promised debt payment. Initially, D=",
+    fmt_num(scenario2_D, 0)
+  ),
+  y_label = paste0(
+    "Risk-neutral PD. Initially PD=",
+    fmt_pct(pd_scenario_2_initial, 2)
+  ),
+  v_lines = c(scenario2_D, scenario2_D - 1),
+  h_lines = c(
+    pd_scenario_2_initial,
+    scenario2_reduce_D,
+    scenario2_raise_E
+  ),
+  points_data = data.frame(
+    promised_debt = c(scenario2_D, scenario2_D - 1, scenario2_D),
+    risk_neutral_pd = c(
+      pd_scenario_2_initial,
+      scenario2_reduce_D,
+      scenario2_raise_E
+    ),
+    point_fill = c("#7A5195", "yellow", "black")
+  ),
+  x_limits = c(0, 2.5),
+  y_limits = c(0, 0.08),
+  legend_text_size = 8
+)
+```
+
+### Scenario 3. More debt or more time
+
+```{r step-093}
+T1 <- mapply(pd, E0, se, rf, 0.5, D.seq)
+
+T2 <- mapply(pd, E0, se, rf, 1, D.seq)
+
+T3 <- mapply(pd, E0, se, rf, 1.5, D.seq)
+
+T4 <- mapply(pd, E0, se, rf, 2, D.seq)
+
+T5 <- mapply(pd, E0, se, rf, 2.5, D.seq)
+```
+
+```{r step-094}
+leg3 <- c("T=2.5", "T=2", "T=1.5", "T=1", "T=0.5")
+
+scenario3_colors <- setNames(unname(colors), leg3)
+
+maturity_curve_data <- make_capital_structure_data(
+  D.seq,
+  setNames(list(T5, T4, T3, T2, T1), leg3)
+)
+```
+
+### Figure 3.25 {#result-figure-3-25}
+
+```{r figure-3-25}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.25. Initial maturity-debt position and Merton risk-neutral PD."
+plot_capital_structure(
+  curve_data = maturity_curve_data,
+  color_values = scenario3_colors,
+  x_label = paste0(
+    "Promised debt payment. Initially, D=",
+    fmt_num(scenario3_D, 0)
+  ),
+  y_label = paste0(
+    "Risk-neutral PD. Initially PD=",
+    fmt_pct(pd_scenario_3_initial, 2)
+  ),
+  v_lines = scenario3_D,
+  h_lines = pd_scenario_3_initial,
+  points_data = data.frame(
+    promised_debt = scenario3_D,
+    risk_neutral_pd = pd_scenario_3_initial,
+    point_fill = "black"
+  )
+)
+```
+
+### Figure 3.26 {#result-figure-3-26}
+
+```{r figure-3-26}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 3.26. Higher promised debt payment versus longer maturity."
+plot_capital_structure(
+  curve_data = maturity_curve_data,
+  color_values = scenario3_colors,
+  x_label = paste0(
+    "Promised debt payment. Initially, D=",
+    fmt_num(scenario3_D, 0)
+  ),
+  y_label = paste0(
+    "Risk-neutral PD. Initially PD=",
+    fmt_pct(pd_scenario_3_initial, 2)
+  ),
+  v_lines = c(scenario3_D, scenario3_D + 2),
+  h_lines = c(
+    pd_scenario_3_initial,
+    scenario3_more_time,
+    scenario3_more_debt
+  ),
+  points_data = data.frame(
+    promised_debt = c(scenario3_D, scenario3_D + 2, scenario3_D),
+    risk_neutral_pd = c(
+      pd_scenario_3_initial,
+      scenario3_more_debt,
+      scenario3_more_time
+    ),
+    point_fill = c("black", "yellow", "#7A5195")
+  )
+)
+```
+
+## Session and numeric results
+
+```{r companion-results}
+companion_finish(knitr::knit_global())
+```

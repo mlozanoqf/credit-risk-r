@@ -1,0 +1,28 @@
+Type: Project
+Title: Credit Risk Modeling with R
+Version: 0.0.1
+Description: Dependencies for the computational companion.
+Depends:
+    R (>= 4.6.1)
+Imports:
+    dplyr,
+    ggplot2,
+    gmodels,
+    httr,
+    jsonlite,
+    knitr,
+    MASS,
+    mnormt,
+    plotly,
+    pROC,
+    renv,
+    rmarkdown,
+    rpart,
+    scales,
+    scatterplot3d,
+    Sim.DiffProc,
+    tibble,
+    tidyr,
+    vembedr,
+    viridis,
+    xgboost

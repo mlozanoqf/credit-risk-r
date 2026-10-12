@@ -1,0 +1,2022 @@
+---
+title: "Portfolio Credit Risk with Copulas"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+execute:
+  echo: true
+  cache: false
+  error: false
+  warning: false
+  message: false
+---
+
+Computational companion. Run from the project root in source order. Each result
+uses the preceding calculations in this chapter. Book numbering follows the
+11 October 2026 review version. The chapter README contains the result index.
+
+```{r companion-setup}
+source("shared/output.R")
+companion_setup("05-copulas")
+```
+
+## 5.1 Default correlation and the portfolio problem
+
+```{r step-001}
+source("shared/figure-theme.R")
+```
+
+```{r step-002}
+knitr::opts_chunk$set(fig.width = 5.5, fig.height = 4)
+```
+
+```{r step-003}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-004}
+copula_input_table <- data.frame(
+  Object = c(
+    "$Q_i(T)$",
+    "$X_i$",
+    "$z_i(T)=N^{-1}(Q_i(T))$",
+    "$\\rho$",
+    "$EAD_i$",
+    "$R_i$",
+    "$LGD_i=1-R_i$"
+  ),
+  Code = c(
+    "`pd_cum`",
+    "simulated standard normal credit-state score",
+    "`default_threshold <- qnorm(pd_cum)`",
+    "`rho`",
+    "`ead`",
+    "`recovery`",
+    "`lgd <- 1 - recovery`"
+  ),
+  Financial_role = c(
+    "Cumulative default probability of firm $i$ by horizon $T$.",
+    "Model score summarizing firm $i$'s credit condition in a scenario; lower values mean weaker credit.",
+    "Default threshold; values below this boundary are defaults.",
+    "Correlation between credit-state scores before converting them into 0/1 defaults.",
+    "Exposure at default measuring the amount at risk.",
+    "Fraction recovered after default.",
+    "Fraction lost after default."
+  )
+)
+```
+
+```{r step-005}
+names(copula_input_table) <- c("Object", "Code", "Financial role")
+```
+
+```{r step-006}
+make_correlation_matrix <- function(n_firms, rho) {
+  sigma <- matrix(rho, nrow = n_firms, ncol = n_firms)
+  diag(sigma) <- 1
+  sigma
+}
+
+simulate_latent_credit <- function(n_sims, n_firms, rho, seed = 130575) {
+  set.seed(seed)
+  MASS::mvrnorm(
+    n = n_sims,
+    mu = rep(0, n_firms),
+    Sigma = make_correlation_matrix(n_firms, rho)
+  )
+}
+
+make_default_matrix <- function(latent_credit, threshold) {
+  latent_credit <= threshold
+}
+
+summarize_default_counts <- function(default_matrix) {
+  default_count <- rowSums(default_matrix)
+  count_table <- as.data.frame(table(default_count))
+  names(count_table) <- c("defaults", "frequency")
+  count_table$defaults <- as.integer(as.character(count_table$defaults))
+  count_table$probability <- count_table$frequency / nrow(default_matrix)
+  count_table
+}
+
+portfolio_losses <- function(default_matrix, ead, recovery) {
+  lgd_amount <- ead * (1 - recovery)
+  as.numeric(default_matrix %*% lgd_amount)
+}
+
+loss_risk_summary <- function(losses) {
+  var_95 <- unname(quantile(losses, 0.95, type = 1))
+  var_99 <- unname(quantile(losses, 0.99, type = 1))
+  var_999 <- unname(quantile(losses, 0.999, type = 1))
+
+  c(
+    expected_loss = mean(losses),
+    median_loss = unname(quantile(losses, 0.50, type = 1)),
+    var_95 = var_95,
+    var_99 = var_99,
+    var_999 = var_999,
+    es_99 = expected_shortfall(losses, 0.99),
+    es_999 = expected_shortfall(losses, 0.999),
+    economic_capital_999 = var_999 - mean(losses)
+  )
+}
+```
+
+### Table 5.1 {#result-table-5-1}
+
+```{r table-5-1}
+rho_selection_table <- data.frame(
+  Source = c(
+    "Historical defaults or migrations",
+    "Equity or asset-return proxies",
+    "CDS or bond-spread co-movement",
+    "Regulatory or internal-model benchmark",
+    "Stress and sensitivity analysis"
+  ),
+  `How it helps` = c(
+    "Uses observed credit events by sector, rating, or region.",
+    "Uses market data for public firms when default histories are sparse.",
+    "Uses credit-market prices that react quickly to common stress.",
+    "Uses a documented benchmark when a portfolio policy or capital framework requires one.",
+    "Reports low, base, and high dependence cases when direct calibration is uncertain."
+  ),
+  `Main caution` = c(
+    "Defaults are rare, so estimates can be noisy.",
+    "Equity and asset returns are proxies for credit states, not defaults themselves.",
+    "Spread co-movement includes liquidity, risk premia, and technical market effects.",
+    "Benchmarks can be too coarse for a specific portfolio.",
+    "Scenario choices need a clear reason; otherwise the parameter becomes arbitrary."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  rho_selection_table,
+  caption = "Practical ways to justify the copula correlation input.",
+  row.names = FALSE
+)
+```
+
+```{r step-008}
+box_x <- c(0.14, 0.38, 0.62, 0.86)
+
+box_labels <- c(
+  "Individual\nPDs",
+  "Shared\ncredit shocks",
+  "Simulated\ndefaults",
+  "Portfolio\nloss distribution"
+)
+
+box_width <- 0.18
+
+box_height <- 0.22
+
+pipeline_boxes <- data.frame(
+  x = box_x,
+  xmin = box_x - box_width / 2,
+  xmax = box_x + box_width / 2,
+  ymin = 0.5 - box_height / 2,
+  ymax = 0.5 + box_height / 2,
+  label = box_labels
+)
+
+pipeline_arrows <- data.frame(
+  x = box_x[-length(box_x)] + box_width / 2 + 0.015,
+  xend = box_x[-1] - box_width / 2 - 0.015,
+  y = 0.5,
+  yend = 0.5
+)
+
+plot_fig_copula_credit_risk_pipeline <- ggplot() +
+  geom_segment(data = pipeline_arrows, aes(x = x, xend = xend, y = y, yend = yend), linewidth = 0.8,
+    color = "#666666", arrow = arrow(length = grid::unit(0.16, "cm"), type = "closed")) +
+  geom_rect(data = pipeline_boxes, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+    fill = "#F4F8FB", color = "#0072B2", linewidth = 0.8)
+```
+
+### Figure 5.1 {#result-figure-5-1}
+
+```{r figure-5-1}
+#| fig-width: 5.5
+#| fig-height: 1.6
+#| fig-cap: "Figure 5.1. Gaussian copula workflow for portfolio credit risk."
+plot_fig_copula_credit_risk_pipeline +
+  geom_text(data = pipeline_boxes,
+    aes(x = x, y = 0.5, label = gsub("loss distribution", "loss\ndistribution", label, fixed = TRUE)),
+    lineheight = 0.95,
+    size = 3.5) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0.35, 0.65), clip = "off") +
+  theme_void()
+```
+
+### Table 5.2 {#result-table-5-2}
+
+```{r table-5-2}
+companion_kable(
+  copula_input_table,
+  caption = "Objects used in the Gaussian copula credit-risk workflow.",
+  escape = FALSE
+)
+```
+
+### Turning a PD into a default threshold
+
+## 5.2 From cumulative PDs to default thresholds
+
+```{r step-011}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-012}
+hull_threshold_table <- data.frame(
+  Horizon = paste(credit_horizons, ifelse(credit_horizons == 1, "year", "years")),
+  Cumulative_PD = fmt_pct(pd_cum, 2),
+  Incremental_PD = fmt_pct(pd_incremental, 2),
+  Default_threshold = fmt_num(default_threshold, 6),
+  Check_pnorm_threshold = fmt_pct(threshold_check, 2)
+)
+names(hull_threshold_table) <- c(
+  "Horizon",
+  "Cumulative PD",
+  "Incremental PD",
+  "Default threshold",
+  "PD recovered from threshold"
+)
+```
+
+```{r step-013}
+hull_threshold_numeric <- data.frame(
+  horizon = credit_horizons,
+  pd_cum = pd_cum,
+  pd_incremental = pd_incremental,
+  threshold = default_threshold,
+  threshold_check = threshold_check
+)
+```
+
+### Table 5.3 {#result-table-5-3}
+
+```{r table-5-3}
+companion_kable(
+  hull_threshold_table,
+  caption = "Hull Example 24.7 inputs and the corresponding Gaussian default thresholds.",
+  escape = FALSE
+)
+```
+
+```{r step-015}
+pd_cum <- c(0.01, 0.03, 0.06, 0.10, 0.15)
+
+pd_incremental <- c(pd_cum[1], diff(pd_cum))
+
+default_threshold <- qnorm(pd_cum)
+
+pnorm(default_threshold)
+```
+
+```{r step-016}
+threshold_scenario_example <- data.frame(
+  Firm = c("Firm A", "Firm B", "Firm C", "Firm D"),
+  Credit_state_score = c(-1.40, -1.05, -0.80, 0.25),
+  Default_threshold = rep(default_threshold[5], 4)
+)
+
+threshold_scenario_example$`Y_i(5)` <- ifelse(
+  threshold_scenario_example$Credit_state_score <=
+    threshold_scenario_example$Default_threshold,
+  1,
+  0
+)
+
+threshold_scenario_example$Interpretation <- ifelse(
+  threshold_scenario_example$`Y_i(5)` == 1,
+  "Default by year 5",
+  "Survival through year 5"
+)
+```
+
+### Table 5.4 {#result-table-5-4}
+
+```{r table-5-4}
+companion_kable(
+  transform(
+    threshold_scenario_example,
+    Credit_state_score = fmt_num(Credit_state_score, 2),
+    Default_threshold = fmt_num(Default_threshold, 6)
+  ),
+  caption = "Illustrative threshold rule for one simulated credit scenario.",
+  row.names = FALSE
+)
+```
+
+```{r step-018}
+threshold_area_horizons <- c(1, 5)
+
+threshold_area_labels <- paste0(
+  "Year ", threshold_area_horizons,
+  " PD = ", fmt_pct(pd_cum[threshold_area_horizons], 2)
+)
+
+threshold_area_colors <- c("#0072B2", "#B22222")
+
+names(threshold_area_colors) <- threshold_area_labels
+
+threshold_area_data <- do.call(rbind, lapply(seq_along(threshold_area_horizons), function(j) {
+  horizon_index <- threshold_area_horizons[j]
+  data.frame(
+    Horizon = threshold_area_labels[j],
+    x = x,
+    Density = D,
+    Threshold = default_threshold[horizon_index],
+    Shade = x <= default_threshold[horizon_index]
+  )
+}))
+
+threshold_area_data$Horizon <- factor(threshold_area_data$Horizon, levels = threshold_area_labels)
+```
+
+```{r step-019}
+threshold_label_data <- data.frame(
+  Horizon = factor(threshold_area_labels, levels = threshold_area_labels),
+  x = -3.75,
+  y = 0.375,
+  label = paste0("z = ", fmt_num(default_threshold[threshold_area_horizons], 3))
+)
+```
+
+```{r step-020}
+plot_fig_hull_247_threshold_areas <- ggplot(threshold_area_data, aes(x = x, y = Density)) +
+  geom_area(data = subset(threshold_area_data, Shade), aes(fill = Horizon), alpha = 0.88) +
+  geom_line(linewidth = 0.8, color = "#222222")
+```
+
+### Figure 5.2 {#result-figure-5-2}
+
+```{r figure-5-2}
+#| fig-width: 5.5
+#| fig-height: 3.3
+#| fig-cap: "Figure 5.2. Default thresholds implied by Hull Example 24.7 cumulative PDs."
+plot_fig_hull_247_threshold_areas +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "#777777") +
+  geom_vline(aes(xintercept = Threshold, color = Horizon), linetype = "dashed", linewidth = 0.9) +
+  geom_label(data = threshold_label_data, aes(x = x, y = y, label = label, color = Horizon),
+    inherit.aes = FALSE, hjust = 0, size = 3.1, label.size = 0.2, fill = "white") +
+  facet_wrap(~Horizon, nrow = 1) +
+  scale_fill_manual(values = threshold_area_colors, guide = "none") +
+  scale_color_manual(values = threshold_area_colors, guide = "none") +
+  coord_cartesian(xlim = c(-4, 4), ylim = c(0, 0.42)) +
+  labs(x = "Credit-state score X", y = "Standard normal density") +
+  book_figure_theme() +
+  theme(aspect.ratio = 1, strip.text = element_text(face = "bold", size = 10), panel.grid.minor = element_blank())
+```
+
+```{r step-022}
+threshold_curve_data <- data.frame(x = x, Probability = P)
+
+threshold_points <- data.frame(
+  Threshold = default_threshold,
+  Cumulative_PD = pd_cum,
+  Horizon = paste0("Y", credit_horizons)
+)
+
+plot_fig_hull_247_threshold_check <- ggplot(threshold_curve_data, aes(x = x, y = Probability)) +
+  geom_line(linewidth = 0.8, color = "#222222")
+```
+
+### Figure 5.3 {#result-figure-5-3}
+
+```{r figure-5-3}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.3. Checking that each Gaussian threshold reproduces the original cumulative PD."
+plot_fig_hull_247_threshold_check +
+  geom_hline(data = threshold_points, aes(yintercept = Cumulative_PD), linetype = "dotted",
+    color = "#BBBBBB") +
+  geom_vline(data = threshold_points, aes(xintercept = Threshold), linetype = "dotted",
+    color = "#BBBBBB") +
+  geom_point(data = threshold_points, aes(x = Threshold, y = Cumulative_PD, color = Horizon),
+    size = 3) +
+  scale_color_manual(values = colors2, name = "Horizon",
+    labels = paste0("Y", credit_horizons, " (year ", credit_horizons, ")")) +
+  scale_y_continuous(labels = function(x) fmt_pct(x, 0)) +
+  labs(x = "Credit-state score X", y = "Cumulative probability N(X)") +
+  book_figure_theme() +
+  theme(panel.grid.minor = element_blank(), legend.position = "right",
+    legend.background = element_blank(), legend.key = element_blank())
+```
+
+```{r step-024}
+plot_fig_hull_247_threshold_check_zoom <- ggplot(threshold_curve_data, aes(x = x, y = Probability)) +
+  geom_line(linewidth = 0.8, color = "#222222")
+```
+
+### Figure 5.4 {#result-figure-5-4}
+
+```{r figure-5-4}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.4. Zoom: Gaussian thresholds and cumulative PDs between -2.5 and -0.5."
+plot_fig_hull_247_threshold_check_zoom +
+  geom_hline(data = threshold_points, aes(yintercept = Cumulative_PD), linetype = "dotted",
+    color = "#BBBBBB") +
+  geom_vline(data = threshold_points, aes(xintercept = Threshold), linetype = "dotted",
+    color = "#BBBBBB") +
+  geom_point(data = threshold_points, aes(x = Threshold, y = Cumulative_PD, color = Horizon),
+    size = 3.4) +
+  scale_color_manual(values = colors2, name = "Horizon",
+    labels = paste0("Y", credit_horizons, " (year ", credit_horizons, ")")) +
+  scale_y_continuous(labels = function(x) fmt_pct(x, 0)) +
+  coord_cartesian(xlim = c(-2.5, -0.5), ylim = c(0, 0.2)) +
+  labs(x = "Credit-state score X", y = "Cumulative probability N(X)") +
+  book_figure_theme() +
+  theme(panel.grid.minor = element_blank(), legend.position = "right",
+    legend.background = element_blank(), legend.key = element_blank())
+```
+
+## 5.3 One firm and the marginal default rule
+
+```{r step-026}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-027}
+one_firm_sims <- 100000
+
+one_firm_horizon <- 5
+
+one_firm_threshold <- default_threshold[one_firm_horizon]
+
+one_firm_pd <- pd_cum[one_firm_horizon]
+```
+
+```{r step-028}
+set.seed(130575)
+
+one_firm_x <- rnorm(one_firm_sims)
+
+one_firm_default <- one_firm_x <= one_firm_threshold
+
+one_firm_simulated_pd_from_code <- mean(one_firm_default)
+
+one_firm_sim_pd <- one_firm_simulated_pd_from_code
+```
+
+```{r step-029}
+one_firm_check <- data.frame(
+  Horizon = paste(one_firm_horizon, "years"),
+  Input_PD = fmt_pct(one_firm_pd, 2),
+  Default_threshold = fmt_num(one_firm_threshold, 6),
+  Simulated_PD = fmt_pct(one_firm_sim_pd, 2),
+  Difference = fmt_pct(one_firm_sim_pd - one_firm_pd, 2)
+)
+
+names(one_firm_check) <- c(
+  "Horizon",
+  "Input PD",
+  "Default threshold",
+  "Simulated PD",
+  "Difference"
+)
+```
+
+### Table 5.5 {#result-table-5-5}
+
+```{r table-5-5}
+companion_kable(
+  one_firm_check,
+  caption = "One-firm simulation check for the 5-year marginal PD.",
+  escape = FALSE
+)
+```
+
+```{r step-031}
+one_firm_hist <- hist(
+  one_firm_x,
+  breaks = 80,
+  probability = TRUE,
+  plot = FALSE
+)
+
+one_firm_hist_data <- data.frame(
+  x_mid = one_firm_hist$mids,
+  density = one_firm_hist$density,
+  default_region = one_firm_hist$mids <= one_firm_threshold
+)
+
+plot_fig_one_firm_marginal_default_check <- ggplot(one_firm_hist_data, aes(x = x_mid, y = density, fill = default_region)) +
+  geom_col(width = diff(one_firm_hist$breaks)[1], color = "white", linewidth = 0.1)
+```
+
+### Figure 5.5 {#result-figure-5-5}
+
+```{r figure-5-5}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.5. One-firm simulation check with threshold comparison."
+plot_fig_one_firm_marginal_default_check +
+  geom_vline(xintercept = one_firm_threshold, linewidth = 1, linetype = "dashed", color = "#B22222") +
+  annotate("label", x = 1.05, y = 0.37, hjust = 0, label = paste0("Threshold = ", fmt_num(one_firm_threshold,
+    3), "\nSimulated PD = ", fmt_pct(one_firm_sim_pd, 2)), size = 3.5, fill = "white",
+    label.size = 0, linewidth = 0) +
+  scale_fill_manual(values = c(`FALSE` = "#0072B2", `TRUE` = "#B22222"), labels = c("Survival region",
+    "Default region"), name = NULL) +
+  coord_cartesian(xlim = c(-4, 4), ylim = c(0, 0.43)) +
+  labs(x = "Simulated credit-state score X", y = "Density") +
+  book_figure_theme() +
+  theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+## 5.4 Two firms and joint defaults
+
+```{r step-033}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-034}
+two_firm_sims <- 100000
+
+two_firm_threshold <- default_threshold[5]
+
+two_firm_pd <- pd_cum[5]
+
+two_firm_rhos <- c(-0.5, -0.2, 0, 0.2, 0.5)
+
+simulate_two_firm_summary <- function(rho) {
+  latent <- simulate_latent_credit(
+    n_sims = two_firm_sims,
+    n_firms = 2,
+    rho = rho,
+    seed = 130575
+  )
+  defaults <- make_default_matrix(latent, two_firm_threshold)
+  default_a <- defaults[, 1]
+  default_b <- defaults[, 2]
+  data.frame(
+    rho = rho,
+    pd_firm_a = mean(default_a),
+    pd_firm_b = mean(default_b),
+    both_default = mean(default_a & default_b),
+    at_least_one = mean(default_a | default_b),
+    default_indicator_corr = cor(as.numeric(default_a), as.numeric(default_b))
+  )
+}
+
+two_firm_numeric <- do.call(rbind, lapply(two_firm_rhos, simulate_two_firm_summary))
+
+two_firm_zero_row <- two_firm_numeric[two_firm_numeric$rho == 0, ]
+
+two_firm_high_row <- two_firm_numeric[two_firm_numeric$rho == 0.5, ]
+
+two_firm_independent_both <- two_firm_pd * two_firm_pd
+
+two_firm_independent_any <- 1 - (1 - two_firm_pd)^2
+
+two_firm_plot_rhos <- c(-0.5, -0.2, 0.2, 0.5)
+
+two_firm_plot_layout_rhos <- c(-0.5, -0.2, 0.2, 0.5)
+```
+
+```{r step-035}
+two_firm_table <- data.frame(
+  Copula_correlation = fmt_num(two_firm_numeric$rho, 1),
+  Simulated_PD_A = fmt_pct(two_firm_numeric$pd_firm_a, 2),
+  Simulated_PD_B = fmt_pct(two_firm_numeric$pd_firm_b, 2),
+  P_both_default = fmt_pct(two_firm_numeric$both_default, 2),
+  P_at_least_one = fmt_pct(two_firm_numeric$at_least_one, 2),
+  Default_variable_corr = fmt_num(two_firm_numeric$default_indicator_corr, 4)
+)
+
+names(two_firm_table) <- c(
+  "$\\rho$",
+  "PD A",
+  "PD B",
+  "P(A and B)",
+  "P(A or B)",
+  "Default corr."
+)
+```
+
+```{r step-036}
+two_firm_plot_data <- lapply(two_firm_plot_rhos, function(rho) {
+  latent <- simulate_latent_credit(
+    n_sims = 6000,
+    n_firms = 2,
+    rho = rho,
+    seed = 130575
+  )
+  data.frame(firm_a = latent[, 1], firm_b = latent[, 2], rho = rho)
+})
+```
+
+```{r step-037}
+rho <- 0.2
+
+sigma <- matrix(c(1, rho, rho, 1), nrow = 2)
+
+set.seed(130575)
+
+credit_state <- MASS::mvrnorm(
+  n = 100000,
+  mu = c(0, 0),
+  Sigma = sigma
+)
+
+threshold <- qnorm(0.15)
+
+default_a <- credit_state[, 1] <= threshold
+
+default_b <- credit_state[, 2] <= threshold
+
+two_firm_direct_check <- data.frame(
+  Quantity = c(
+    "Simulated PD for firm A",
+    "Simulated PD for firm B",
+    "Simulated joint-default probability"
+  ),
+  Value = c(
+    fmt_pct(mean(default_a), 2),
+    fmt_pct(mean(default_b), 2),
+    fmt_pct(mean(default_a & default_b), 2)
+  )
+)
+```
+
+### Table 5.6 {#result-table-5-6}
+
+```{r table-5-6}
+companion_kable(
+  two_firm_direct_check,
+  caption = "Direct two-firm simulation check for $\\rho = 0.2$.",
+  row.names = FALSE
+)
+```
+
+### From score correlation to default correlation
+
+```{r step-039}
+p_a <- two_firm_high_row$pd_firm_a
+p_b <- two_firm_high_row$pd_firm_b
+p_both <- two_firm_high_row$both_default
+indicator_corr_from_frequencies <- (p_both - p_a * p_b) /
+  sqrt(p_a * (1 - p_a) * p_b * (1 - p_b))
+
+p_rounded <- round(c(p_a, p_b, p_both), 4)
+indicator_corr_rounded <- (p_rounded[3] - p_rounded[1] * p_rounded[2]) /
+  sqrt(p_rounded[1] * (1 - p_rounded[1]) *
+       p_rounded[2] * (1 - p_rounded[2]))
+stopifnot(abs(indicator_corr_from_frequencies -
+              two_firm_high_row$default_indicator_corr) < 1e-12)
+indicator_corr_from_frequencies
+```
+
+### Table 5.7 {#result-table-5-7}
+
+```{r table-5-7}
+companion_kable(
+  two_firm_table,
+  caption = "Two-firm default probabilities under different Gaussian copula correlations.",
+  escape = FALSE
+)
+```
+
+```{r step-041}
+two_firm_scatter_data <- do.call(rbind, lapply(two_firm_plot_data, function(plot_data) {
+  rho <- unique(plot_data$rho)
+  rho_label <- paste0("rho == ", fmt_num(rho, 1))
+  data.frame(
+    firm_a = plot_data$firm_a,
+    firm_b = plot_data$firm_b,
+    rho = rho,
+    rho_label = rho_label,
+    joint_default = plot_data$firm_a <= two_firm_threshold &
+      plot_data$firm_b <= two_firm_threshold
+  )
+}))
+
+two_firm_scatter_data$rho_label <- factor(
+  two_firm_scatter_data$rho_label,
+  levels = paste0("rho == ", fmt_num(two_firm_plot_layout_rhos, 1))
+)
+
+two_firm_panel_data <- unique(
+  two_firm_scatter_data[, c("rho", "rho_label")]
+)
+
+two_firm_joint_counts <- aggregate(
+  joint_default ~ rho_label,
+  data = two_firm_scatter_data,
+  FUN = sum
+)
+
+two_firm_joint_counts$label <- paste0("Joint defaults: ", fmt_int(two_firm_joint_counts$joint_default))
+
+plot_fig_two_firm_copula_scatter <- ggplot(two_firm_scatter_data, aes(x = firm_a, y = firm_b)) +
+  geom_rect(data = two_firm_panel_data, aes(xmin = -4, xmax = two_firm_threshold, ymin = -4,
+    ymax = two_firm_threshold), inherit.aes = FALSE, fill = "#B22222", alpha = 0.1) +
+  geom_point(aes(color = joint_default), size = 0.45, alpha = 0.55)
+```
+
+### Figure 5.6 {#result-figure-5-6}
+
+```{r figure-5-6}
+#| fig-width: 5.5
+#| fig-height: 5.8
+#| fig-cap: "Figure 5.6. Two-firm Gaussian copula simulations across negative and positive correlations."
+plot_fig_two_firm_copula_scatter +
+  geom_vline(xintercept = two_firm_threshold, linetype = "dashed", linewidth = 0.8) +
+  geom_hline(yintercept = two_firm_threshold, linetype = "dashed", linewidth = 0.8) +
+  geom_label(data = two_firm_joint_counts, aes(x = 1, y = -3.55, label = label), inherit.aes = FALSE,
+    size = 2.8, fill = "white", label.size = 0, linewidth = 0) +
+  facet_wrap(~rho_label, ncol = 2, labeller = label_parsed) +
+  scale_color_manual(values = c(`FALSE` = adjustcolor("#666666", alpha.f = 0.55), `TRUE` = "#B22222"),
+    labels = c("Other scenarios", "Joint defaults"), name = NULL) +
+  coord_equal(xlim = c(-4, 4), ylim = c(-4, 4)) +
+  labs(x = "Firm A credit-state score", y = "Firm B credit-state score") +
+  book_figure_theme() +
+  theme(legend.position = "top", legend.background = element_rect(fill = "white", color = NA),
+    legend.key = element_rect(fill = "white", color = NA), strip.text = element_text(face = "bold",
+        size = 10), strip.background = element_rect(fill = "white", color = NA), panel.grid.minor = element_blank())
+```
+
+## 5.5 Ten firms in a portfolio default simulation
+
+```{r step-043}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-044}
+portfolio_sims <- 100000
+
+n_firms_hull <- 10
+
+hull_horizon <- 5
+
+hull_threshold <- default_threshold[hull_horizon]
+
+hull_pd <- pd_cum[hull_horizon]
+
+hull_rho <- hull_example_247_rho
+
+rho_scenarios <- c(0, 0.2, 0.5)
+
+summarize_default_events <- function(default_matrix) {
+  default_count <- rowSums(default_matrix)
+  n_firms <- ncol(default_matrix)
+  c(
+    expected_defaults = mean(default_count),
+    no_default = mean(default_count == 0),
+    at_least_one = mean(default_count >= 1),
+    three_or_more = mean(default_count >= 3),
+    five_or_more = mean(default_count >= 5),
+    all_default = mean(default_count == n_firms)
+  )
+}
+
+simulate_default_counts <- function(rho) {
+  latent <- simulate_latent_credit(
+    n_sims = portfolio_sims,
+    n_firms = n_firms_hull,
+    rho = rho,
+    seed = 130575
+  )
+  defaults <- make_default_matrix(latent, hull_threshold)
+  default_count <- rowSums(defaults)
+  list(
+    latent = latent,
+    defaults = defaults,
+    default_count = default_count,
+    events = summarize_default_events(defaults)
+  )
+}
+
+default_scenarios <- setNames(
+  lapply(rho_scenarios, simulate_default_counts),
+  paste0("rho_", rho_scenarios)
+)
+
+hull_default_count <- default_scenarios[[paste0("rho_", hull_rho)]]$default_count
+
+hull_distribution <- data.frame(
+  Defaults = 0:n_firms_hull,
+  Frequency = as.integer(tabulate(hull_default_count + 1, nbins = n_firms_hull + 1))
+)
+
+hull_distribution$Probability <- hull_distribution$Frequency / portfolio_sims
+
+event_summary_numeric <- do.call(rbind, lapply(default_scenarios, function(x) x$events))
+```
+
+```{r step-045}
+event_summary_table <- data.frame(
+  Copula_correlation = fmt_num(rho_scenarios, 1),
+  Expected_defaults = fmt_num(event_summary_numeric[, "expected_defaults"], 3),
+  P_no_default = fmt_pct(event_summary_numeric[, "no_default"], 2),
+  P_at_least_one = fmt_pct(event_summary_numeric[, "at_least_one"], 2),
+  P_three_or_more = fmt_pct(event_summary_numeric[, "three_or_more"], 2),
+  P_five_or_more = fmt_pct(event_summary_numeric[, "five_or_more"], 2),
+  P_all_ten = fmt_pct(event_summary_numeric[, "all_default"], 4)
+)
+
+names(event_summary_table) <- c(
+  "$\\rho$",
+  "E[defaults]",
+  "P(0)",
+  "P(>=1)",
+  "P(>=3)",
+  "P(>=5)",
+  "P(10)"
+)
+```
+
+```{r step-046}
+count_probability_matrix <- sapply(default_scenarios, function(x) {
+  as.numeric(tabulate(x$default_count + 1, nbins = n_firms_hull + 1)) / portfolio_sims
+})
+
+colnames(count_probability_matrix) <- paste0("rho = ", fmt_num(rho_scenarios, 1))
+```
+
+```{r step-047}
+n_firms_hull <- 10
+
+rho <- 0.2
+
+sigma <- matrix(rho, nrow = n_firms_hull, ncol = n_firms_hull)
+
+diag(sigma) <- 1
+```
+
+### Table 5.8 {#result-table-5-8}
+
+```{r table-5-8}
+companion_kable(
+  sigma,
+  digits = 1,
+  caption = "Equal-correlation matrix for the ten-firm portfolio."
+)
+```
+
+```{r step-049}
+portfolio_sims <- 100000
+
+set.seed(130575)
+
+credit_state <- MASS::mvrnorm(
+  n = portfolio_sims,
+  mu = rep(0, n_firms_hull),
+  Sigma = sigma
+)
+
+threshold_5y <- qnorm(0.15)
+
+defaults_5y <- credit_state <= threshold_5y
+
+default_count_5y <- rowSums(defaults_5y)
+
+head(default_count_5y)
+```
+
+```{r step-050}
+hull_distribution_table <- data.frame(
+  Defaults = hull_distribution$Defaults,
+  Frequency = fmt_int(hull_distribution$Frequency),
+  Probability = fmt_pct(hull_distribution$Probability, 3)
+)
+```
+
+### Table 5.9 {#result-table-5-9}
+
+```{r table-5-9}
+companion_kable(
+  hull_distribution_table,
+  caption = "Distribution of the number of defaults by year 5 for ten firms and $\\rho = 0.2$.",
+  escape = FALSE
+)
+```
+
+### Changing correlation while preserving individual PDs
+
+### Table 5.10 {#result-table-5-10}
+
+```{r table-5-10}
+companion_kable(
+  event_summary_table,
+  caption = "Default-event probabilities for ten firms under different copula correlations.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-053}
+default_counts <- 0:n_firms_hull
+
+default_count_colors <- c("#0072B2", "#B77900", "#B22222")
+
+default_count_plot_data <- data.frame(
+  Defaults = rep(default_counts, times = ncol(count_probability_matrix)),
+  Probability = as.vector(count_probability_matrix),
+  Correlation = factor(
+    rep(colnames(count_probability_matrix), each = length(default_counts)),
+    levels = colnames(count_probability_matrix)
+  )
+)
+
+plot_fig_ten_firm_default_count_distribution <- ggplot(default_count_plot_data, aes(x = Defaults, y = Probability, color = Correlation,
+    group = Correlation)) +
+  geom_line(linewidth = 0.8, alpha = 0.85) +
+  geom_point(size = 3.2, alpha = 0.82)
+```
+
+### Figure 5.7 {#result-figure-5-7}
+
+```{r figure-5-7}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.7. Distribution of the number of defaults by year 5 under different copula correlations."
+plot_fig_ten_firm_default_count_distribution +
+  scale_color_manual(values = default_count_colors,
+    labels = lapply(rho_scenarios, function(x) bquote(rho == .(x)))) +
+  scale_x_continuous(breaks = default_counts) +
+  scale_y_continuous(labels = function(x) fmt_pct(x, 1), expand = expansion(mult = c(0.02,
+    0.08))) +
+  labs(x = "Number of defaults by year 5", y = "Simulated probability", color = "Copula correlation") +
+  book_figure_theme() +
+  theme(legend.position = "top", panel.grid.minor = element_blank(), plot.margin = margin(5.5,
+    12, 5.5, 5.5))
+```
+
+## 5.6 From correlated defaults to portfolio losses
+
+```{r step-055}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-056}
+loss_sims <- 100000
+
+loss_n_firms <- 10
+
+loss_total_ead <- 100e6
+
+loss_ead <- rep(loss_total_ead / loss_n_firms, loss_n_firms)
+
+loss_recovery <- rep(0.40, loss_n_firms)
+
+loss_lgd <- 1 - loss_recovery
+
+loss_threshold <- default_threshold[5]
+
+loss_rhos <- c(0, 0.2, 0.5)
+
+loss_expected_theoretical <- sum(loss_ead * loss_lgd * pd_cum[5])
+
+simulate_loss_scenario <- function(rho, ead = loss_ead, recovery = loss_recovery) {
+  latent <- simulate_latent_credit(
+    n_sims = loss_sims,
+    n_firms = length(ead),
+    rho = rho,
+    seed = 130575
+  )
+  defaults <- make_default_matrix(latent, loss_threshold)
+  losses <- portfolio_losses(defaults, ead, recovery)
+  list(defaults = defaults, losses = losses, summary = loss_risk_summary(losses))
+}
+
+loss_scenarios <- setNames(
+  lapply(loss_rhos, simulate_loss_scenario),
+  paste0("rho_", loss_rhos)
+)
+
+loss_summary_numeric <- do.call(rbind, lapply(loss_scenarios, function(x) x$summary))
+
+loss_focus_rho_index <- which(loss_rhos == 0.2)
+
+loss_focus_summary <- loss_summary_numeric[loss_focus_rho_index, ]
+```
+
+```{r step-057}
+loss_summary_table <- data.frame(
+  Copula_correlation = fmt_num(loss_rhos, 1),
+  Expected_loss = fmt_musd(loss_summary_numeric[, "expected_loss"]),
+  Median_loss = fmt_musd(loss_summary_numeric[, "median_loss"]),
+  VaR_95 = fmt_musd(loss_summary_numeric[, "var_95"]),
+  VaR_99 = fmt_musd(loss_summary_numeric[, "var_99"]),
+  VaR_99_9 = fmt_musd(loss_summary_numeric[, "var_999"]),
+  ES_99 = fmt_musd(loss_summary_numeric[, "es_99"]),
+  Economic_capital_99_9 = fmt_musd(loss_summary_numeric[, "economic_capital_999"])
+)
+
+names(loss_summary_table) <- c(
+  "$\\rho$",
+  "EL",
+  "Median",
+  "VaR 95%",
+  "VaR 99%",
+  "VaR 99.9%",
+  "ES 99%",
+  "Capital 99.9%"
+)
+```
+
+```{r step-058}
+loss_distribution_matrix <- sapply(loss_scenarios, function(x) {
+  as.numeric(tabulate(x$losses / (loss_ead[1] * loss_lgd[1]) + 1, nbins = loss_n_firms + 1)) / loss_sims
+})
+
+colnames(loss_distribution_matrix) <- paste0("rho = ", fmt_num(loss_rhos, 1))
+```
+
+```{r step-059}
+ead <- rep(10e6, 10)
+
+recovery <- rep(0.40, 10)
+
+lgd <- 1 - recovery
+
+losses <- defaults_5y %*% (ead * lgd)
+```
+
+### Averaging losses in the worst tail
+
+```{r step-060}
+expected_shortfall <- function(losses, confidence) {
+  stopifnot(is.numeric(losses), length(losses) > 0,
+            all(is.finite(losses)), length(confidence) == 1,
+            is.finite(confidence), confidence >= 0, confidence < 1)
+  threshold <- unname(quantile(losses, confidence, type = 1))
+  excess <- pmax(losses - threshold, 0)
+  threshold + mean(excess) / (1 - confidence)
+}
+```
+
+```{r step-061}
+es_losses <- loss_scenarios[[loss_focus_rho_index]]$losses
+es_confidence <- 0.99
+es_threshold <- unname(quantile(es_losses, es_confidence, type = 1))
+es_tail_size <- length(es_losses) * (1 - es_confidence)
+es_above_count <- sum(es_losses > es_threshold)
+es_tied_count <- sum(es_losses == es_threshold)
+es_boundary_weight <- es_tail_size - es_above_count
+es_excess_total <- sum(pmax(es_losses - es_threshold, 0))
+es_checked <- expected_shortfall(es_losses, es_confidence)
+```
+
+### Table 5.11 {#result-table-5-11}
+
+```{r table-5-11}
+companion_kable(
+  loss_summary_table,
+  caption = "Portfolio loss summary for a homogeneous ten-firm portfolio.",
+  escape = FALSE
+)
+```
+
+```{r step-063}
+loss_steps <- 0:loss_n_firms
+
+loss_distribution_colors <- c("#0072B2", "#B77900", "#B22222")
+
+loss_distribution_plot_data <- data.frame(
+  Loss = rep(loss_steps * loss_ead[1] * loss_lgd[1] / 1e6, times = ncol(loss_distribution_matrix)),
+  Probability = as.vector(loss_distribution_matrix),
+  Correlation = factor(
+    rep(colnames(loss_distribution_matrix), each = length(loss_steps)),
+    levels = colnames(loss_distribution_matrix)
+  )
+)
+
+plot_fig_portfolio_loss_distribution <- ggplot(loss_distribution_plot_data, aes(x = Loss, y = Probability, color = Correlation,
+    group = Correlation)) +
+  geom_line(linewidth = 0.8, alpha = 0.85) +
+  geom_point(size = 3.2, alpha = 0.82)
+```
+
+### Figure 5.8 {#result-figure-5-8}
+
+```{r figure-5-8}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.8. Portfolio loss distribution under different copula correlations."
+plot_fig_portfolio_loss_distribution +
+  scale_color_manual(values = loss_distribution_colors,
+    labels = lapply(loss_rhos, function(x) bquote(rho == .(x)))) +
+  scale_x_continuous(breaks = loss_steps * loss_ead[1] * loss_lgd[1]/1e+06) +
+  scale_y_continuous(labels = function(x) fmt_pct(x, 1), expand = expansion(mult = c(0.02,
+    0.08))) +
+  labs(x = "Portfolio loss ($ millions)", y = "Simulated probability", color = "Copula correlation") +
+  book_figure_theme() +
+  theme(legend.position = "top", panel.grid.minor = element_blank(), plot.margin = margin(5.5,
+    12, 5.5, 5.5))
+```
+
+## 5.7 Concentration risk with different exposure weights
+
+```{r step-065}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-066}
+concentration_sims <- 100000
+
+concentration_n_firms <- 10
+
+concentration_rho <- 0.2
+
+concentration_total_ead <- 100e6
+
+concentration_recovery <- rep(0.40, concentration_n_firms)
+
+ead_equal <- rep(concentration_total_ead / concentration_n_firms, concentration_n_firms)
+
+ead_concentrated <- c(40e6, rep(60e6 / 9, 9))
+
+latent_concentration <- simulate_latent_credit(
+  n_sims = concentration_sims,
+  n_firms = concentration_n_firms,
+  rho = concentration_rho,
+  seed = 130575
+)
+
+defaults_concentration <- make_default_matrix(latent_concentration, default_threshold[5])
+
+loss_equal <- portfolio_losses(defaults_concentration, ead_equal, concentration_recovery)
+
+loss_concentrated <- portfolio_losses(defaults_concentration, ead_concentrated, concentration_recovery)
+
+concentration_summary_numeric <- rbind(
+  Equal_exposures = loss_risk_summary(loss_equal),
+  Concentrated_exposure = loss_risk_summary(loss_concentrated)
+)
+
+equal_single_default_loss <- ead_equal[1] * (1 - concentration_recovery[1])
+
+large_borrower_default_loss <- ead_concentrated[1] * (1 - concentration_recovery[1])
+
+concentration_capital_increase <- concentration_summary_numeric["Concentrated_exposure", "economic_capital_999"] -
+  concentration_summary_numeric["Equal_exposures", "economic_capital_999"]
+```
+
+```{r step-067}
+concentration_summary_table <- data.frame(
+  Portfolio = c("Equal exposures", "One large borrower"),
+  Largest_EAD = fmt_musd(c(max(ead_equal), max(ead_concentrated))),
+  Expected_loss = fmt_musd(concentration_summary_numeric[, "expected_loss"]),
+  VaR_99 = fmt_musd(concentration_summary_numeric[, "var_99"]),
+  VaR_99_9 = fmt_musd(concentration_summary_numeric[, "var_999"]),
+  ES_99 = fmt_musd(concentration_summary_numeric[, "es_99"]),
+  Economic_capital_99_9 = fmt_musd(concentration_summary_numeric[, "economic_capital_999"])
+)
+
+names(concentration_summary_table) <- c(
+  "Portfolio",
+  "Max EAD",
+  "EL",
+  "VaR 99%",
+  "VaR 99.9%",
+  "ES 99%",
+  "Capital 99.9%"
+)
+```
+
+### Table 5.12 {#result-table-5-12}
+
+```{r table-5-12}
+companion_kable(
+  concentration_summary_table,
+  caption = "Concentration risk with the same total exposure, PD, recovery, and copula correlation.",
+  escape = FALSE
+)
+```
+
+```{r step-069}
+concentration_breaks <- seq(0, max(loss_concentrated) / 1e6 + 4, by = 4)
+
+make_concentration_hist_data <- function(losses, var_value, portfolio) {
+  hist_object <- hist(
+    losses / 1e6,
+    breaks = concentration_breaks,
+    plot = FALSE
+  )
+  data.frame(
+    Portfolio = portfolio,
+    x_mid = hist_object$mids,
+    Frequency = hist_object$counts,
+    Tail = hist_object$mids >= var_value / 1e6
+  )
+}
+
+concentration_hist_data <- rbind(
+  make_concentration_hist_data(
+    loss_equal,
+    concentration_summary_numeric["Equal_exposures", "var_99"],
+    "Equal exposures"
+  ),
+  make_concentration_hist_data(
+    loss_concentrated,
+    concentration_summary_numeric["Concentrated_exposure", "var_99"],
+    "One large borrower"
+  )
+)
+
+concentration_hist_data$Portfolio <- factor(
+  concentration_hist_data$Portfolio,
+  levels = c("Equal exposures", "One large borrower")
+)
+
+concentration_hist_data$Fill <- ifelse(
+  concentration_hist_data$Tail,
+  "99% VaR tail",
+  as.character(concentration_hist_data$Portfolio)
+)
+
+concentration_var_data <- data.frame(
+  Portfolio = factor(c("Equal exposures", "One large borrower"), levels = levels(concentration_hist_data$Portfolio)),
+  VaR = c(
+    concentration_summary_numeric["Equal_exposures", "var_99"],
+    concentration_summary_numeric["Concentrated_exposure", "var_99"]
+  ) / 1e6
+)
+
+plot_fig_concentration_risk_losses <- ggplot(concentration_hist_data, aes(x = x_mid, y = Frequency, fill = Fill)) +
+  geom_col(width = diff(concentration_breaks)[1], color = "white", linewidth = 0.15)
+```
+
+### Figure 5.9 {#result-figure-5-9}
+
+```{r figure-5-9}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.9. Same defaults and different exposure weights."
+plot_fig_concentration_risk_losses +
+  geom_vline(data = concentration_var_data, aes(xintercept = VaR), inherit.aes = FALSE,
+    color = "#7B241C", linewidth = 1, linetype = "dashed") +
+  facet_wrap(~Portfolio, nrow = 1) +
+  scale_fill_manual(values = c(`Equal exposures` = "#0072B2", `One large borrower` = "#B77900",
+    `99% VaR tail` = "#B22222"), breaks = c("Equal exposures", "One large borrower", "99% VaR tail"),
+    name = NULL) +
+  labs(x = "Portfolio loss ($ millions)", y = "Frequency") +
+  book_figure_theme() +
+  theme(legend.position = "top", strip.text = element_text(face = "bold"), panel.grid.minor = element_blank())
+```
+
+## 5.8 Tail dependence with a t-copula
+
+```{r step-071}
+simulate_t_copula_credit <- function(n_sims, n_firms, rho, df, seed = 130575) {
+  set.seed(seed)
+  gaussian_latent <- MASS::mvrnorm(
+    n = n_sims,
+    mu = rep(0, n_firms),
+    Sigma = make_correlation_matrix(n_firms, rho)
+  )
+  scale_shock <- sqrt(rchisq(n_sims, df = df) / df)
+  gaussian_latent / scale_shock
+}
+```
+
+```{r step-072}
+tcopula_sims <- 100000
+
+tcopula_n_firms <- 10
+
+tcopula_rho <- hull_example_247_rho
+
+tcopula_pd <- pd_cum[5]
+
+tcopula_total_ead <- 100e6
+
+tcopula_ead <- rep(tcopula_total_ead / tcopula_n_firms, tcopula_n_firms)
+
+tcopula_recovery <- rep(0.40, tcopula_n_firms)
+
+tcopula_design <- data.frame(
+  copula = c("Gaussian", "t-copula", "t-copula"),
+  df = c(NA, 10, 4)
+)
+
+simulate_tail_dependence_case <- function(copula, df) {
+  if (copula == "Gaussian") {
+    latent <- simulate_latent_credit(
+      n_sims = tcopula_sims,
+      n_firms = tcopula_n_firms,
+      rho = tcopula_rho,
+      seed = 130575
+    )
+    threshold <- qnorm(tcopula_pd)
+  } else {
+    latent <- simulate_t_copula_credit(
+      n_sims = tcopula_sims,
+      n_firms = tcopula_n_firms,
+      rho = tcopula_rho,
+      df = df,
+      seed = 130575
+    )
+    threshold <- qt(tcopula_pd, df = df)
+  }
+
+  defaults <- make_default_matrix(latent, threshold)
+  losses <- portfolio_losses(defaults, tcopula_ead, tcopula_recovery)
+
+  list(
+    defaults = defaults,
+    default_count = rowSums(defaults),
+    losses = losses,
+    events = summarize_default_events(defaults),
+    loss_summary = loss_risk_summary(losses),
+    mean_pd = mean(defaults)
+  )
+}
+
+tcopula_results <- Map(
+  simulate_tail_dependence_case,
+  tcopula_design$copula,
+  tcopula_design$df
+)
+
+names(tcopula_results) <- c("Gaussian", "t df = 10", "t df = 4")
+
+tcopula_events <- do.call(rbind, lapply(tcopula_results, function(x) x$events))
+
+tcopula_losses <- do.call(rbind, lapply(tcopula_results, function(x) x$loss_summary))
+```
+
+```{r step-073}
+tcopula_df_label <- ifelse(is.na(tcopula_design$df), "-", fmt_int(tcopula_design$df))
+
+tcopula_default_table <- data.frame(
+  Copula = tcopula_design$copula,
+  df = tcopula_df_label,
+  Mean_PD = fmt_pct(sapply(tcopula_results, function(x) x$mean_pd), 2),
+  Expected_defaults = fmt_num(tcopula_events[, "expected_defaults"], 3),
+  P_three_or_more = fmt_pct(tcopula_events[, "three_or_more"], 2),
+  P_five_or_more = fmt_pct(tcopula_events[, "five_or_more"], 2),
+  P_all_ten = fmt_pct(tcopula_events[, "all_default"], 3)
+)
+
+names(tcopula_default_table) <- c(
+  "Copula",
+  "df",
+  "Mean PD",
+  "E[defaults]",
+  "P(>=3)",
+  "P(>=5)",
+  "P(10)"
+)
+```
+
+```{r step-074}
+tcopula_loss_table <- data.frame(
+  Copula = tcopula_design$copula,
+  df = tcopula_df_label,
+  EL = fmt_musd(tcopula_losses[, "expected_loss"]),
+  VaR_99 = fmt_musd(tcopula_losses[, "var_99"]),
+  VaR_99_9 = fmt_musd(tcopula_losses[, "var_999"]),
+  ES_99_9 = fmt_musd(tcopula_losses[, "es_999"]),
+  Capital_99_9 = fmt_musd(tcopula_losses[, "economic_capital_999"])
+)
+
+names(tcopula_loss_table) <- c(
+  "Copula",
+  "df",
+  "EL",
+  "VaR 99%",
+  "VaR 99.9%",
+  "ES 99.9%",
+  "Capital 99.9%"
+)
+```
+
+```{r step-075}
+tcopula_count_matrix <- sapply(tcopula_results, function(x) {
+  as.numeric(tabulate(x$default_count + 1, nbins = tcopula_n_firms + 1)) /
+    tcopula_sims
+})
+
+colnames(tcopula_count_matrix) <- names(tcopula_results)
+```
+
+### Following the shared scale in one scenario
+
+```{r step-076}
+set.seed(130575)
+t_trace_normal <- MASS::mvrnorm(
+  tcopula_sims, rep(0, tcopula_n_firms),
+  make_correlation_matrix(tcopula_n_firms, tcopula_rho)
+)
+t_trace_df <- 4
+t_trace_chisq <- rchisq(tcopula_sims, df = t_trace_df)
+t_trace_scale <- sqrt(t_trace_chisq / t_trace_df)
+t_trace_scores <- t_trace_normal / t_trace_scale
+t_trace_gaussian_cutoff <- qnorm(tcopula_pd)
+t_trace_cutoff <- qt(tcopula_pd, df = t_trace_df)
+t_trace_row <- which(
+  rowSums(t_trace_normal <= t_trace_gaussian_cutoff) == 0 &
+  rowSums(t_trace_scores <= t_trace_cutoff) >= 2
+)[1]
+t_trace_firms <- which(
+  t_trace_scores[t_trace_row, ] <= t_trace_cutoff
+)[1:2]
+```
+
+### Table 5.13 {#result-table-5-13}
+
+```{r table-5-13}
+data.frame(
+  Firm = t_trace_firms,
+  `Normal score` = fmt_num(t_trace_normal[t_trace_row, t_trace_firms], 4),
+  `Scaled score` = fmt_num(t_trace_scores[t_trace_row, t_trace_firms], 4),
+  `Gaussian outcome` = "Survival",
+  `t-copula outcome` = "Default",
+  check.names = FALSE
+) |>
+  companion_kable(caption = "Two firms affected by the same t-copula scale draw.")
+```
+
+### Table 5.14 {#result-table-5-14}
+
+```{r table-5-14}
+companion_kable(
+  tcopula_default_table,
+  caption = "Default clustering under Gaussian and t-copulas.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+### Table 5.15 {#result-table-5-15}
+
+```{r table-5-15}
+companion_kable(
+  tcopula_loss_table,
+  caption = "Portfolio loss measures under Gaussian and t-copulas.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-080}
+default_counts <- 0:tcopula_n_firms
+
+tcopula_count_colors <- c("#0072B2", "#B77900", "#B22222")
+
+tcopula_count_plot_data <- data.frame(
+  Defaults = rep(default_counts, times = ncol(tcopula_count_matrix)),
+  Probability = as.vector(tcopula_count_matrix),
+  Copula = factor(
+    rep(colnames(tcopula_count_matrix), each = length(default_counts)),
+    levels = colnames(tcopula_count_matrix)
+  )
+)
+
+plot_fig_gaussian_vs_t_default_counts <- ggplot(tcopula_count_plot_data, aes(x = Defaults, y = Probability, color = Copula, group = Copula)) +
+  geom_line(linewidth = 0.8, alpha = 0.85) +
+  geom_point(size = 3.2, alpha = 0.82)
+```
+
+### Figure 5.10 {#result-figure-5-10}
+
+```{r figure-5-10}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.10. Default-count distribution under Gaussian and t-copulas."
+plot_fig_gaussian_vs_t_default_counts +
+  scale_color_manual(values = tcopula_count_colors) +
+  scale_x_continuous(breaks = default_counts) +
+  scale_y_continuous(labels = function(x) fmt_pct(x, 1), expand = expansion(mult = c(0.02,
+    0.08))) +
+  labs(x = "Number of defaults by year 5", y = "Simulated probability", color = "Copula") +
+  book_figure_theme() +
+  theme(legend.position = "top", panel.grid.minor = element_blank(), plot.margin = margin(5.5,
+    12, 5.5, 5.5))
+```
+
+## 5.9 Credit VaR under copula model risk
+
+```{r step-082}
+source("chapters/05-copulas/helpers/portfolio.R")
+```
+
+```{r step-083}
+credit_var_inputs <- list(
+  ead = 100e6,
+  pd = 0.02,
+  recovery = 0.60,
+  rho = 0.10,
+  confidence = c(0.95, 0.99, 0.999)
+)
+
+credit_var_focus <- length(credit_var_inputs$confidence)
+
+credit_var_focus_alpha <- credit_var_inputs$confidence[credit_var_focus]
+```
+
+### From the common credit factor to a loss percentile
+
+```{r step-084}
+factor_examples <- c(0, qnorm(1 - credit_var_focus_alpha))
+conditional_pd_examples <- pnorm(
+  (qnorm(credit_var_inputs$pd) -
+     sqrt(credit_var_inputs$rho) * factor_examples) /
+    sqrt(1 - credit_var_inputs$rho)
+)
+conditional_pd_examples
+```
+
+```{r step-085}
+vasicek_default_rate <- function(pd, rho, confidence) {
+  pnorm(
+    (qnorm(pd) + sqrt(rho) * qnorm(confidence)) /
+      sqrt(1 - rho)
+  )
+}
+
+vasicek_credit_var <- function(ead, pd, recovery, rho, confidence) {
+  ead * (1 - recovery) * vasicek_default_rate(pd, rho, confidence)
+}
+```
+
+```{r step-086}
+credit_var_rate <- vasicek_default_rate(
+  credit_var_inputs$pd,
+  credit_var_inputs$rho,
+  credit_var_inputs$confidence
+)
+
+credit_var_loss <- vasicek_credit_var(
+  credit_var_inputs$ead,
+  credit_var_inputs$pd,
+  credit_var_inputs$recovery,
+  credit_var_inputs$rho,
+  credit_var_inputs$confidence
+)
+
+credit_expected_loss <- credit_var_inputs$ead *
+  (1 - credit_var_inputs$recovery) *
+  credit_var_inputs$pd
+
+
+
+credit_var_q_pd <- qnorm(credit_var_inputs$pd)
+
+credit_var_q_conf <- qnorm(credit_var_inputs$confidence[credit_var_focus])
+
+credit_var_numerator <- credit_var_q_pd +
+  sqrt(credit_var_inputs$rho) * credit_var_q_conf
+
+credit_var_denominator <- sqrt(1 - credit_var_inputs$rho)
+
+credit_var_standardized <- credit_var_numerator / credit_var_denominator
+```
+
+```{r step-087}
+credit_var_input_table <- data.frame(
+  Quantity = c(
+    "Total exposure",
+    "One-year PD",
+    "Recovery rate",
+    "LGD",
+    "Copula correlation"
+  ),
+  Value = c(
+    fmt_musd(credit_var_inputs$ead),
+    fmt_pct(credit_var_inputs$pd, 2),
+    fmt_pct(credit_var_inputs$recovery, 2),
+    fmt_pct(1 - credit_var_inputs$recovery, 2),
+    fmt_num(credit_var_inputs$rho, 2)
+  )
+)
+```
+
+### Table 5.16 {#result-table-5-16}
+
+```{r table-5-16}
+companion_kable(
+  credit_var_input_table,
+  caption = "Inputs for the Vasicek-style Credit VaR approximation.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-089}
+credit_var_code_bridge_table <- data.frame(
+  `Financial object` = c(
+    "$Q(T)$",
+    "$\\rho$",
+    "$\\alpha$",
+    "$EAD$",
+    "$LGD$",
+    "$V(\\alpha,T)$",
+    "Credit VaR"
+  ),
+  `Code object` = c(
+    "`pd`",
+    "`rho`",
+    "`confidence`",
+    "`ead`",
+    "`1 - recovery`",
+    "`vasicek_default_rate()`",
+    "`vasicek_credit_var()`"
+  ),
+  `Role in the calculation` = c(
+    "Average cumulative default probability for each name.",
+    "Common-factor correlation that controls co-default risk.",
+    "Tail probability level used to select a bad common-factor state.",
+    "Portfolio exposure at default.",
+    "Loss severity after recovery.",
+    "Tail default rate implied by the common-factor state.",
+    "Dollar loss percentile after multiplying the tail default rate by EAD and LGD."
+  )
+)
+```
+
+### Table 5.17 {#result-table-5-17}
+
+```{r table-5-17}
+companion_kable(
+  credit_var_code_bridge_table,
+  caption = "Mapping the Credit VaR notation to the R implementation.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-091}
+credit_var_step_table <- data.frame(
+  Step = c(
+    "Default threshold",
+    "Tail quantile",
+    "Factor contribution",
+    "Numerator",
+    "Denominator",
+    "Standardized value",
+    "Tail default rate",
+    "Credit VaR"
+  ),
+  Calculation = c(
+    "$N^{-1}(Q(T))$",
+    "$N^{-1}(\\alpha)$",
+    "$\\sqrt{\\rho}\\,N^{-1}(\\alpha)$",
+    "$N^{-1}(Q(T))+\\sqrt{\\rho}\\,N^{-1}(\\alpha)$",
+    "$\\sqrt{1-\\rho}$",
+    "$\\frac{N^{-1}(Q(T))+\\sqrt{\\rho}\\,N^{-1}(\\alpha)}{\\sqrt{1-\\rho}}$",
+    "$N(\\cdot)$",
+    "$EAD\\times LGD\\times V(\\alpha,T)$"
+  ),
+  Value = c(
+    fmt_num(credit_var_q_pd, 4),
+    fmt_num(credit_var_q_conf, 4),
+    fmt_num(sqrt(credit_var_inputs$rho) * credit_var_q_conf, 4),
+    fmt_num(credit_var_numerator, 4),
+    fmt_num(credit_var_denominator, 4),
+    fmt_num(credit_var_standardized, 4),
+    fmt_pct(credit_var_rate[credit_var_focus], 2),
+    fmt_musd(credit_var_loss[credit_var_focus])
+  )
+)
+```
+
+### Table 5.18 {#result-table-5-18}
+
+```{r table-5-18}
+companion_kable(
+  credit_var_step_table,
+  caption = "Numerical substitution for the 99.9% Credit VaR calculation.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-093}
+set.seed(130575)
+
+systematic_factor <- rnorm(200000)
+
+conditional_default_rate <- pnorm(
+  (qnorm(credit_var_inputs$pd) -
+     sqrt(credit_var_inputs$rho) * systematic_factor) /
+    sqrt(1 - credit_var_inputs$rho)
+)
+
+vasicek_loss <- credit_var_inputs$ead *
+  (1 - credit_var_inputs$recovery) *
+  conditional_default_rate
+
+simulated_var_loss <- as.numeric(
+  quantile(vasicek_loss, credit_var_inputs$confidence, type = 1)
+)
+
+simulated_es_loss <- sapply(credit_var_inputs$confidence, function(confidence) {
+  expected_shortfall(vasicek_loss, confidence)
+})
+```
+
+```{r step-094}
+credit_var_summary_table <- data.frame(
+  Confidence = fmt_pct(credit_var_inputs$confidence, 1),
+  Tail_default_rate = fmt_pct(credit_var_rate, 2),
+  Credit_VaR = fmt_musd(credit_var_loss),
+  EL = fmt_musd(rep(credit_expected_loss, length(credit_var_loss))),
+  Capital = fmt_musd(credit_var_loss - credit_expected_loss),
+  ES = fmt_musd(simulated_es_loss)
+)
+
+names(credit_var_summary_table) <- c(
+  "Confidence",
+  "Tail default rate",
+  "Credit VaR",
+  "EL",
+  "Capital",
+  "ES"
+)
+```
+
+### Table 5.19 {#result-table-5-19}
+
+```{r table-5-19}
+companion_kable(
+  credit_var_summary_table,
+  caption = "Gaussian Vasicek Credit VaR, expected loss, capital, and expected shortfall.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-096}
+credit_var_999_table <- data.frame(
+  Quantity = c(
+    "Tail default rate at 99.9%",
+    "Credit VaR at 99.9%",
+    "Expected loss",
+    "Economic capital at 99.9%",
+    "Expected shortfall at 99.9%"
+  ),
+  Value = c(
+    fmt_pct(credit_var_rate[3], 2),
+    fmt_musd(credit_var_loss[3]),
+    fmt_musd(credit_expected_loss),
+    fmt_musd(credit_var_loss[3] - credit_expected_loss),
+    fmt_musd(simulated_es_loss[3])
+  )
+)
+```
+
+### Table 5.20 {#result-table-5-20}
+
+```{r table-5-20}
+companion_kable(
+  credit_var_999_table,
+  caption = "The 99.9% Gaussian Credit VaR calculation.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-098}
+vasicek_factor_plot_data <- data.frame(
+  Systematic_factor = systematic_factor,
+  Loss = vasicek_loss / 1e6
+)
+
+plot_fig_vasicek_factor_loss <- ggplot(vasicek_factor_plot_data, aes(x = Systematic_factor, y = Loss)) +
+  geom_point(size = 2.15, alpha = 0.12, color = "#666666")
+```
+
+### Figure 5.11 {#result-figure-5-11}
+
+```{r figure-5-11}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.11. Systematic factor and conditional portfolio loss."
+plot_fig_vasicek_factor_loss +
+  geom_hline(yintercept = credit_var_loss[3]/1e+06, color = "#B22222", linetype = "dashed",
+    linewidth = 1) +
+  annotate("label", x = quantile(systematic_factor, 0.96), y = credit_var_loss[3]/1e+06,
+    label = paste0("99.9% Credit VaR ", fmt_musd(credit_var_loss[3])), hjust = 1, vjust = -0.25,
+    size = 3.4, fill = "white", label.size = 0, linewidth = 0, color = "#7B241C") +
+  labs(x = "Systematic credit factor", y = "Conditional portfolio loss ($ millions)") +
+  book_figure_theme() +
+  theme(panel.grid.minor = element_blank())
+```
+
+### Comparing capital under alternative copulas
+
+```{r step-100}
+credit_model_sims <- 200000
+
+credit_model_n_names <- 1000
+```
+
+```{r step-101}
+simulate_granular_gaussian_loss <- function(n_sims, n_names, ead, pd, recovery, rho, seed) {
+  set.seed(seed)
+  systematic_factor <- rnorm(n_sims)
+  conditional_pd <- pnorm(
+    (qnorm(pd) - sqrt(rho) * systematic_factor) / sqrt(1 - rho)
+  )
+  default_count <- rbinom(n_sims, n_names, conditional_pd)
+  default_count * (ead / n_names) * (1 - recovery)
+}
+
+simulate_granular_t_loss <- function(n_sims, n_names, ead, pd, recovery, rho, df, seed) {
+  set.seed(seed)
+  systematic_factor <- rnorm(n_sims)
+  scale_shock <- sqrt(rchisq(n_sims, df = df) / df)
+  conditional_pd <- pnorm(
+    (qt(pd, df = df) * scale_shock - sqrt(rho) * systematic_factor) /
+      sqrt(1 - rho)
+  )
+  default_count <- rbinom(n_sims, n_names, conditional_pd)
+  default_count * (ead / n_names) * (1 - recovery)
+}
+```
+
+```{r step-102}
+credit_gaussian_sim_loss <- simulate_granular_gaussian_loss(
+  n_sims = credit_model_sims,
+  n_names = credit_model_n_names,
+  ead = credit_var_inputs$ead,
+  pd = credit_var_inputs$pd,
+  recovery = credit_var_inputs$recovery,
+  rho = credit_var_inputs$rho,
+  seed = 130575
+)
+
+credit_t10_sim_loss <- simulate_granular_t_loss(
+  n_sims = credit_model_sims,
+  n_names = credit_model_n_names,
+  ead = credit_var_inputs$ead,
+  pd = credit_var_inputs$pd,
+  recovery = credit_var_inputs$recovery,
+  rho = credit_var_inputs$rho,
+  df = 10,
+  seed = 130575
+)
+
+credit_t4_sim_loss <- simulate_granular_t_loss(
+  n_sims = credit_model_sims,
+  n_names = credit_model_n_names,
+  ead = credit_var_inputs$ead,
+  pd = credit_var_inputs$pd,
+  recovery = credit_var_inputs$recovery,
+  rho = credit_var_inputs$rho,
+  df = 4,
+  seed = 130575
+)
+
+credit_model_loss_list <- list(
+  "Gaussian sim" = credit_gaussian_sim_loss,
+  "t df = 10" = credit_t10_sim_loss,
+  "t df = 4" = credit_t4_sim_loss
+)
+
+credit_model_summary <- do.call(
+  rbind,
+  lapply(credit_model_loss_list, loss_risk_summary)
+)
+```
+
+```{r step-103}
+credit_model_risk_table <- rbind(
+  data.frame(
+    Model = "Vasicek formula",
+    df = "-",
+    EL = fmt_musd(credit_expected_loss),
+    VaR_99 = fmt_musd(credit_var_loss[2]),
+    VaR_99_9 = fmt_musd(credit_var_loss[3]),
+    ES_99_9 = fmt_musd(simulated_es_loss[3]),
+    Capital_99_9 = fmt_musd(credit_var_loss[3] - credit_expected_loss)
+  ),
+  data.frame(
+    Model = c("Gaussian sim", "t-copula sim", "t-copula sim"),
+    df = c("-", "10", "4"),
+    EL = fmt_musd(credit_model_summary[, "expected_loss"]),
+    VaR_99 = fmt_musd(credit_model_summary[, "var_99"]),
+    VaR_99_9 = fmt_musd(credit_model_summary[, "var_999"]),
+    ES_99_9 = fmt_musd(credit_model_summary[, "es_999"]),
+    Capital_99_9 = fmt_musd(credit_model_summary[, "economic_capital_999"])
+  )
+)
+
+names(credit_model_risk_table) <- c(
+  "Model",
+  "df",
+  "EL",
+  "VaR 99%",
+  "VaR 99.9%",
+  "ES 99.9%",
+  "Capital 99.9%"
+)
+```
+
+### Table 5.21 {#result-table-5-21}
+
+```{r table-5-21}
+companion_kable(
+  credit_model_risk_table,
+  caption = "Credit VaR model risk under Gaussian and t-copula assumptions.",
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-105}
+credit_gaussian_capital <- credit_model_summary["Gaussian sim", "economic_capital_999"]
+
+credit_t4_capital <- credit_model_summary["t df = 4", "economic_capital_999"]
+```
+
+```{r step-106}
+credit_tail_grid <- seq(
+  0,
+  max(sapply(credit_model_loss_list, quantile, probs = 0.9995, type = 1)),
+  length.out = 160
+)
+
+credit_tail_survival <- sapply(credit_model_loss_list, function(losses) {
+  sapply(credit_tail_grid, function(loss_cutoff) mean(losses >= loss_cutoff))
+})
+
+credit_tail_survival[credit_tail_survival == 0] <- NA
+```
+
+```{r step-107}
+credit_tail_plot_data <- data.frame(
+  Loss = rep(credit_tail_grid / 1e6, times = ncol(credit_tail_survival)),
+  Survival = as.vector(credit_tail_survival),
+  Model = factor(
+    rep(colnames(credit_tail_survival), each = length(credit_tail_grid)),
+    levels = colnames(credit_tail_survival)
+  )
+)
+
+plot_fig_credit_var_copula_tail <- ggplot(subset(credit_tail_plot_data, !is.na(Survival) & Survival > 0), aes(x = Loss, y = Survival,
+    color = Model)) +
+  geom_line(linewidth = 0.8, alpha = 0.9)
+```
+
+### Figure 5.12 {#result-figure-5-12}
+
+```{r figure-5-12}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 5.12. Loss-tail survival probabilities under Gaussian and t-copulas."
+plot_fig_credit_var_copula_tail +
+  scale_color_manual(values = c("#0072B2", "#B77900", "#B22222")) +
+  scale_y_log10(labels = function(x) fmt_pct(x, 2)) +
+  labs(x = "Portfolio loss ($ millions)", y = "P(loss >= x)", color = "Model") +
+  book_figure_theme() +
+  theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+### Checking the precision of the tail comparison
+
+```{r step-109}
+precision_inputs <- list(
+  n_sims = credit_model_sims, n_names = credit_model_n_names,
+  ead = credit_var_inputs$ead, pd = credit_var_inputs$pd,
+  recovery = credit_var_inputs$recovery, rho = credit_var_inputs$rho
+)
+precision_seeds <- 130576:130595
+credit_tail_repeats <- t(vapply(precision_seeds, function(seed) {
+  gaussian_loss <- do.call(simulate_granular_gaussian_loss,
+    c(precision_inputs, list(seed = seed)))
+  t_loss <- do.call(simulate_granular_t_loss,
+    c(precision_inputs, list(df = 4, seed = seed)))
+  gaussian_es <- expected_shortfall(gaussian_loss, 0.999)
+  t_es <- expected_shortfall(t_loss, 0.999)
+  c(Gaussian = gaussian_es, Student = t_es,
+    Difference = t_es - gaussian_es)
+}, numeric(3)))
+```
+
+```{r step-110}
+tail_precision_mean <- colMeans(credit_tail_repeats)
+tail_precision_sd <- apply(credit_tail_repeats, 2, sd)
+tail_precision_se <- tail_precision_sd / sqrt(length(precision_seeds))
+```
+
+### Table 5.22 {#result-table-5-22}
+
+```{r table-5-22}
+tail_precision_table <- data.frame(
+  Estimate = c("Gaussian ES", "t(4) ES", "t(4) minus Gaussian"),
+  Mean = fmt_num(tail_precision_mean / 1e6, 3),
+  `Run SD` = fmt_num(tail_precision_sd / 1e6, 3),
+  `SE of mean` = fmt_num(tail_precision_se / 1e6, 3),
+  check.names = FALSE
+)
+companion_kable(tail_precision_table, row.names = FALSE,
+  caption = "Monte Carlo precision of the 99.9% expected-shortfall comparison, in USD millions.")
+```
+
+## Session and numeric results
+
+```{r companion-results}
+companion_finish(knitr::knit_global())
+```

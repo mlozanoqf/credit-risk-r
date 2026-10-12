@@ -1,0 +1,2259 @@
+---
+title: "Tree-based credit scoring"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+execute:
+  echo: true
+  cache: false
+  error: false
+  warning: false
+  message: false
+---
+
+Computational companion. Run from the project root in source order. Each result
+uses the preceding calculations in this chapter. Book numbering follows the
+11 October 2026 review version. The chapter README contains the result index.
+
+```{r companion-setup}
+source("shared/output.R")
+companion_setup("02-tree-based")
+```
+
+```{r step-001}
+source("chapters/02-tree-based/helpers/models.R")
+```
+
+## 2.1 The same credit scoring benchmark
+
+```{r step-002}
+source("chapters/01-logistic/helpers/models.R")
+source("shared/formatting.R")
+source("shared/figure-theme.R")
+library(rpart)
+library(xgboost)
+actual_default_tree <- as.numeric(as.character(test$loan_st))
+brier_score <- function(actual, predicted_probability) {
+  mean((predicted_probability - actual)^2)
+}
+```
+
+```{r step-003}
+model_metrics |>
+  mutate(
+    auc = round(auc, 4),
+    brier_score = round(brier_score, 4),
+    brier_skill = round(brier_skill, 4)
+  )
+```
+
+## 2.2 A single decision tree
+
+```{r step-004}
+tree_formula <- loan_st ~ age + int + grade + log(l_amnt) + log(income) +
+  emp_len + home + sex + region
+
+simple_tree <- rpart::rpart(
+  tree_formula,
+  data = train,
+  method = "class",
+  control = rpart::rpart.control(
+    maxdepth = 4,
+    minsplit = 100,
+    cp = 0.001
+  )
+)
+
+simple_tree
+```
+
+```{r step-005}
+printed_tree_frame <- simple_tree$frame
+printed_leaf_rows <- which(printed_tree_frame$var == "<leaf>")
+printed_example_row <- printed_leaf_rows[
+  which.max(printed_tree_frame$yval2[printed_leaf_rows, 5])
+]
+printed_example <- printed_tree_frame[printed_example_row, ]
+printed_example_id <- as.integer(rownames(printed_example))
+printed_example_rule <- labels(simple_tree, minlength = 0)[printed_example_row]
+```
+
+### How the first split separates risk
+
+```{r step-006}
+first_split <- simple_tree$frame[c("1", "2", "3"), ]
+split_n <- first_split$n
+split_pd <- first_split$yval2[, 5]
+split_gini <- 2 * split_pd * (1 - split_pd)
+children_gini <- sum(split_n[2:3] * split_gini[2:3]) / split_n[1]
+gini_reduction <- split_gini[1] - children_gini
+gini_reduction
+```
+
+```{r step-007}
+tree_frame <- simple_tree$frame
+tree_nodes <- data.frame(
+  node_id = as.integer(row.names(tree_frame)),
+  row_id = seq_len(nrow(tree_frame)),
+  split_variable = tree_frame$var,
+  n = tree_frame$n,
+  default_count = tree_frame$yval2[, 3],
+  default_rate = tree_frame$yval2[, 5],
+  is_leaf = tree_frame$var == "<leaf>",
+  stringsAsFactors = FALSE
+)
+```
+
+### Figure 2.1 {#result-figure-2-1}
+
+```{r figure-2-1}
+#| fig-width: 5.5
+#| fig-height: 6.2
+#| fig-cap: "Figure 2.1. A single decision tree for credit scoring."
+tree_nodes$parent_id <- ifelse(tree_nodes$node_id == 1, NA, tree_nodes$node_id %/% 2)
+tree_nodes$depth <- floor(log2(tree_nodes$node_id))
+tree_node_rules <- labels(simple_tree, minlength = 0)
+
+clean_tree_rule <- function(x) {
+  x <- gsub("sex=0", "sex = 0 (male)", x, fixed = TRUE)
+  x <- gsub("sex=1", "sex = 1 (female)", x, fixed = TRUE)
+  x <- gsub(",", ", ", x, fixed = TRUE)
+  x <- gsub("log\\(l_amnt\\)", "log(loan amount)", x)
+  x <- gsub("log\\(income\\)", "log(income)", x)
+  x <- gsub("\\bint\\b", "interest rate", x)
+  x <- gsub("\\bl_amnt\\b", "loan amount", x)
+  x <- gsub("\\bemp_len\\b", "employment length", x)
+  x <- gsub("\\bloan_st\\b", "default", x)
+  x <- gsub("<", " < ", x)
+  x <- gsub(">=", " >= ", x)
+  x <- gsub("  +", " ", x)
+  trimws(x)
+}
+
+tree_nodes$node_rule <- clean_tree_rule(tree_node_rules)
+tree_nodes$node_rule[tree_nodes$node_id == 1] <- "All training applicants"
+tree_nodes$node_type <- ifelse(tree_nodes$is_leaf, "Leaf", "Node")
+tree_nodes$node_rule_plot <- vapply(
+  tree_nodes$node_rule,
+  function(rule_i) paste(strwrap(rule_i, width = 14), collapse = "\n"),
+  character(1)
+)
+leaf_ids <- tree_nodes$node_id[tree_nodes$is_leaf]
+tree_nodes$leaf_number <- NA_integer_
+tree_nodes$leaf_number[tree_nodes$is_leaf] <- seq_along(leaf_ids)
+tree_nodes$node_heading <- ifelse(
+  tree_nodes$is_leaf,
+  paste0("Leaf ", tree_nodes$leaf_number),
+  ifelse(tree_nodes$node_id == 1, "Root", "Split")
+)
+
+tree_nodes$x <- NA_real_
+tree_nodes$x[tree_nodes$is_leaf] <- seq_along(leaf_ids)
+
+for (depth_i in rev(seq_len(max(tree_nodes$depth) + 1) - 1)) {
+  parent_rows <- which(tree_nodes$depth == depth_i & !tree_nodes$is_leaf)
+  for (row_i in parent_rows) {
+    child_rows <- which(tree_nodes$parent_id == tree_nodes$node_id[row_i])
+    tree_nodes$x[row_i] <- mean(tree_nodes$x[child_rows], na.rm = TRUE)
+  }
+}
+tree_nodes$y <- -tree_nodes$depth
+tree_x_limits <- range(tree_nodes$x, na.rm = TRUE) + c(-0.55, 0.55)
+tree_y_limits <- range(tree_nodes$y, na.rm = TRUE) + c(-0.55, 0.55)
+
+tree_nodes$node_label <- paste0(
+  tree_nodes$node_heading,
+  "\n",
+  tree_nodes$node_rule_plot,
+  "\nPD = ", fmt_pct(tree_nodes$default_rate, 1),
+  "\n", fmt_int(tree_nodes$default_count), " / ", fmt_int(tree_nodes$n)
+)
+
+tree_edges <- merge(
+  tree_nodes[, c("node_id", "x", "y")],
+  tree_nodes[, c("node_id", "parent_id", "x", "y")],
+  by.x = "node_id",
+  by.y = "parent_id",
+  suffixes = c("_parent", "_child")
+)
+
+ggplot2::ggplot() +
+  ggplot2::geom_segment(
+    data = tree_edges,
+    ggplot2::aes(
+      x = x_parent,
+      y = y_parent,
+      xend = x_child,
+      yend = y_child
+    ),
+    linewidth = 0.35,
+    color = book_plot_colors[["reference"]]
+  ) +
+  ggplot2::geom_label(
+    data = tree_nodes,
+    ggplot2::aes(x = x, y = y, label = node_label, fill = default_rate),
+    label.size = 0,
+    linewidth = 0,
+    label.padding = grid::unit(0.24, "lines"),
+    size = 3,
+    lineheight = 0.95,
+    color = "gray10"
+  ) +
+  ggplot2::scale_fill_gradientn(
+    colors = c("#E5F0F7", "#F4D5A0", "#D67560"),
+    labels = function(x) fmt_pct(x, 0),
+    name = "Node PD",
+    guide = ggplot2::guide_colorbar(barwidth = 7, barheight = 0.5)
+  ) +
+  ggplot2::coord_cartesian(
+    xlim = tree_x_limits,
+    ylim = tree_y_limits,
+    clip = "off"
+  ) +
+  book_figure_theme() +
+  ggplot2::theme_void(base_size = 10) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    legend.title = ggplot2::element_text(size = 10),
+    legend.text = ggplot2::element_text(size = 9),
+    legend.background = ggplot2::element_rect(fill = "white", color = NA),
+    plot.margin = grid::unit(c(8, 10, 8, 10), "pt")
+  )
+```
+
+### Table 2.1 {#result-table-2-1}
+
+```{r table-2-1}
+leaf_paths <- path.rpart(simple_tree, nodes = leaf_ids, print.it = FALSE)
+
+leaf_path_plain <- vapply(leaf_paths, function(path_i) {
+  path_i <- clean_tree_rule(path_i[path_i != "root"])
+  paste(path_i, collapse = "; ")
+}, character(1))
+
+leaf_path_text <- vapply(leaf_paths, function(path_i) {
+  path_i <- clean_tree_rule(path_i[path_i != "root"])
+  path_i <- gsub(">=", "&gt;=", path_i, fixed = TRUE)
+  path_i <- gsub("<", "&lt;", path_i, fixed = TRUE)
+  paste(path_i, collapse = "<br>")
+}, character(1))
+
+leaf_summary <- tree_nodes[tree_nodes$is_leaf, ]
+lowest_leaf_index <- which.min(leaf_summary$default_rate)
+highest_leaf_index <- which.max(leaf_summary$default_rate)
+
+leaf_table <- data.frame(
+  leaf = leaf_summary$leaf_number,
+  rule = leaf_path_text,
+  applicants = fmt_int(leaf_summary$n),
+  defaults = fmt_int(leaf_summary$default_count),
+  predicted_PD = fmt_pct(leaf_summary$default_rate, 2),
+  row.names = NULL
+)
+
+cat('
+<style>
+.tree-leaf-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.tree-leaf-table col:nth-child(1) { width: 7% !important; }
+.tree-leaf-table col:nth-child(2) { width: 44% !important; }
+.tree-leaf-table col:nth-child(3) { width: 16% !important; }
+.tree-leaf-table col:nth-child(4) { width: 15% !important; }
+.tree-leaf-table col:nth-child(5) { width: 18% !important; }
+.tree-leaf-table th:nth-child(1),
+.tree-leaf-table td:nth-child(1) {
+  text-align: center !important;
+}
+.tree-leaf-table th:nth-child(n+3),
+.tree-leaf-table td:nth-child(n+3) {
+  text-align: right !important;
+  white-space: nowrap;
+}
+</style>
+')
+
+companion_kable(
+  leaf_table,
+  format = "html",
+  caption = "Terminal leaves of the single decision tree.",
+  col.names = c("Leaf", "Rule", "Applicants", "Defaults", "Predicted PD"),
+  escape = FALSE,
+  table.attr = 'class="tree-leaf-table table"'
+)
+```
+
+```{r step-010}
+pred_tree_simple <- predict(simple_tree, newdata = test, type = "prob")[, "1"]
+ROC_tree_simple <- pROC::roc(test$loan_st, pred_tree_simple, quiet = TRUE)
+single_tree_pd_range <- range(pred_tree_simple)
+single_tree_distinct_pds <- length(unique(pred_tree_simple))
+single_tree_brier <- brier_score(actual_default_tree, pred_tree_simple)
+```
+
+### Table 2.2 {#result-table-2-2}
+
+```{r table-2-2}
+single_tree_prediction_summary <- data.frame(
+  Quantity = c(
+    "Minimum predicted PD",
+    "Maximum predicted PD",
+    "Distinct predicted PD values",
+    "Test-set AUC",
+    "Test-set Brier score"
+  ),
+  Value = c(
+    fmt_pct(min(pred_tree_simple), 2),
+    fmt_pct(max(pred_tree_simple), 2),
+    fmt_int(length(unique(pred_tree_simple))),
+    fmt_num(as.numeric(auc(ROC_tree_simple)), 4),
+    fmt_num(brier_score(actual_default_tree, pred_tree_simple), 4)
+  )
+)
+
+companion_kable(
+  single_tree_prediction_summary,
+  caption = "Single-tree prediction summary on the test set.",
+  row.names = FALSE
+)
+```
+
+## 2.3 Preparing the XGBoost input matrices
+
+### Table 2.3 {#result-table-2-3}
+
+```{r table-2-3}
+companion_kable(
+  data.frame(
+    step = c(
+      "Borrower and loan information",
+      "Observed default outcome",
+      "Encoded numerical matrix",
+      "XGBoost score",
+      "Predicted probability of default",
+      "Credit decision"
+    ),
+    R_object = c(
+      "`train` and `test`",
+      "`loan_st`",
+      "`xgb_train_matrix` and `xgb_test_matrix`",
+      "`predict(..., outputmargin = TRUE)` conceptually",
+      "`pred_xgb`",
+      "cutoff or acceptance-rate rule"
+    ),
+    interpretation = c(
+      "Applicant characteristics available before the lending decision",
+      "Historical repayment result used for training and evaluation",
+      "One row per applicant and one numerical column per model signal",
+      "Log-odds scale value produced by the boosted trees",
+      "Default-risk estimate after the logistic transformation",
+      "Rule that converts the PD into accept or reject"
+    )
+  ),
+  caption = "Bridge between credit-scoring objects and XGBoost objects.",
+  escape = FALSE
+)
+```
+
+```{r step-013}
+xgb_formula <- ~ age + int + grade + log(l_amnt) + log(income) +
+  emp_len + home + sex + region
+
+xgb_train_matrix <- model.matrix(xgb_formula, data = train)[, -1, drop = FALSE]
+xgb_test_matrix <- model.matrix(xgb_formula, data = test)[, -1, drop = FALSE]
+xgb_train_label <- as.numeric(as.character(train$loan_st))
+xgb_test_label <- actual_default_tree
+
+xgb_train <- xgboost::xgb.DMatrix(
+  data = xgb_train_matrix,
+  label = xgb_train_label
+)
+xgb_test <- xgboost::xgb.DMatrix(
+  data = xgb_test_matrix,
+  label = xgb_test_label
+)
+```
+
+### Table 2.4 {#result-table-2-4}
+
+```{r table-2-4}
+xgb_matrix_dimensions <- data.frame(
+  Object = c("Training matrix", "Test matrix"),
+  Rows = fmt_int(c(nrow(xgb_train_matrix), nrow(xgb_test_matrix))),
+  Columns = fmt_int(c(ncol(xgb_train_matrix), ncol(xgb_test_matrix)))
+)
+
+companion_kable(
+  xgb_matrix_dimensions,
+  caption = "Dimensions of the encoded XGBoost design matrices.",
+  row.names = FALSE
+)
+```
+
+```{r step-015}
+colnames(xgb_train_matrix)
+stopifnot(identical(colnames(xgb_train_matrix), colnames(xgb_test_matrix)))
+```
+
+## 2.4 From trees to boosted trees
+
+```{r step-016}
+xgb_params <- list(
+  objective = "binary:logistic",
+  eval_metric = c("logloss", "auc"),
+  max_depth = 3,
+  eta = 0.05,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  min_child_weight = 20,
+  lambda = 1,
+  base_score = mean(xgb_train_label)
+)
+xgb_nrounds <- 160
+xgb_checkpoint_rounds <- c(5, 20, 60, 100, xgb_nrounds)
+xgb_base_pd <- xgb_params$base_score
+xgb_base_score <- qlogis(xgb_base_pd)
+```
+
+### Table 2.5 {#result-table-2-5}
+
+```{r table-2-5}
+xgb_path_settings_table <- data.frame(
+  Parameter = c(
+    "`objective`",
+    "`max_depth`",
+    "`eta`",
+    "`subsample`",
+    "`colsample_bytree`",
+    "`min_child_weight`",
+    "`lambda`",
+    "`base_score`",
+    "Full-model `nrounds`",
+    "Checkpoint rounds"
+  ),
+  Value = c(
+    "`binary:logistic`",
+    xgb_params$max_depth,
+    xgb_params$eta,
+    xgb_params$subsample,
+    xgb_params$colsample_bytree,
+    xgb_params$min_child_weight,
+    xgb_params$lambda,
+    fmt_pct(xgb_base_pd, 2),
+    xgb_nrounds,
+    paste(c(0, xgb_checkpoint_rounds), collapse = ", ")
+  ),
+  Role = c(
+    "Fits a binary default model and returns probabilities after the logistic transformation.",
+    "Limits each individual tree to shallow interactions.",
+    "Learning rate; controls how much each new tree can change the running score.",
+    "Uses a fraction of training rows in each boosting round.",
+    "Uses a fraction of encoded predictors in each boosting round.",
+    "Requires enough weighted observations before making a child node.",
+    "Regularization penalty on leaf corrections; higher values shrink leaf values.",
+    "Initial PD before any tree is added.",
+    "Number of boosted trees in the full model.",
+    "Selected rounds used only to inspect the prediction path."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_path_settings_table,
+  caption = "XGBoost settings used for the checkpoint path and the full model.",
+  row.names = FALSE
+)
+```
+
+```{r step-018}
+xgb_checkpoint_models <- lapply(xgb_checkpoint_rounds, function(rounds) {
+  set.seed(567)
+  xgboost::xgb.train(
+    params = xgb_params,
+    data = xgb_train,
+    nrounds = rounds,
+    verbose = 0
+  )
+})
+xgb_full_checkpoint_model <- xgb_checkpoint_models[[length(xgb_checkpoint_models)]]
+
+xgb_checkpoint_margin_matrix <- sapply(
+  xgb_checkpoint_models,
+  function(model_i) predict(model_i, newdata = xgb_test, outputmargin = TRUE)
+)
+colnames(xgb_checkpoint_margin_matrix) <- as.character(xgb_checkpoint_rounds)
+xgb_checkpoint_pd_matrix <- plogis(xgb_checkpoint_margin_matrix)
+
+xgb_path_score_matrix <- cbind(
+  "0" = xgb_base_score,
+  xgb_checkpoint_margin_matrix
+)
+xgb_path_pd_matrix <- cbind(
+  "0" = xgb_base_pd,
+  xgb_checkpoint_pd_matrix
+)
+colnames(xgb_path_score_matrix) <- c(0, xgb_checkpoint_rounds)
+colnames(xgb_path_pd_matrix) <- c(0, xgb_checkpoint_rounds)
+
+xgb_path_log_loss <- function(actual, predicted_pd) {
+  predicted_pd <- pmin(pmax(predicted_pd, 1e-8), 1 - 1e-8)
+  -(actual * log(predicted_pd) + (1 - actual) * log(1 - predicted_pd))
+}
+
+xgb_base_loss <- xgb_path_log_loss(actual_default_tree, xgb_base_pd)
+xgb_full_loss <- xgb_path_log_loss(
+  actual_default_tree,
+  xgb_path_pd_matrix[, as.character(xgb_nrounds)]
+)
+xgb_loss_gain <- xgb_base_loss - xgb_full_loss
+xgb_visible_move <- rowSums(abs(t(apply(xgb_path_score_matrix, 1, diff))))
+
+xgb_default_candidates <- which(
+  actual_default_tree == 1 &
+    xgb_path_pd_matrix[, as.character(xgb_nrounds)] > xgb_base_pd
+)
+xgb_nondefault_candidates <- which(
+  actual_default_tree == 0 &
+    xgb_path_pd_matrix[, as.character(xgb_nrounds)] < xgb_base_pd
+)
+
+if (length(xgb_default_candidates) > 0) {
+  xgb_default_index <- xgb_default_candidates[
+    which.max(xgb_loss_gain[xgb_default_candidates] +
+                0.05 * xgb_visible_move[xgb_default_candidates])
+  ]
+} else {
+  xgb_default_index <- which.max(xgb_loss_gain + 0.05 * xgb_visible_move)
+}
+
+if (length(xgb_nondefault_candidates) > 0) {
+  xgb_nondefault_index <- xgb_nondefault_candidates[
+    which.max(xgb_loss_gain[xgb_nondefault_candidates] +
+                0.05 * xgb_visible_move[xgb_nondefault_candidates])
+  ]
+} else {
+  xgb_nondefault_index <- which.max(-xgb_full_loss + 0.05 * xgb_visible_move)
+}
+
+xgb_case_indices <- c(
+  "Default case" = xgb_default_index,
+  "Non-default case" = xgb_nondefault_index
+)
+```
+
+### Table 2.6 {#result-table-2-6}
+
+```{r table-2-6}
+format_rate <- function(x) {
+  ifelse(abs(x) > 1, paste0(fmt_num(x, 2), "%"), fmt_pct(x, 2))
+}
+
+format_money_value <- function(x) {
+  paste0("$", fmt_num(x, 0))
+}
+
+format_emp_len_value <- function(x) {
+  paste0(fmt_num(as.numeric(x), 2), " years")
+}
+
+format_sex_value <- function(x) {
+  sex_code <- as.character(x)
+  sex_label <- ifelse(
+    sex_code == "1",
+    "female",
+    ifelse(sex_code == "0", "male", "unknown")
+  )
+  paste0(sex_code, " (", sex_label, ")")
+}
+
+format_region_value <- function(x) {
+  region_code <- as.character(x)
+  region_label <- c(
+    "N" = "North",
+    "E" = "East",
+    "W" = "West",
+    "S" = "South",
+    "NE" = "Northeast",
+    "NW" = "Northwest",
+    "SE" = "Southeast",
+    "SW" = "Southwest"
+  )[region_code]
+  region_label <- ifelse(is.na(region_label), "unknown", region_label)
+  paste0(region_code, " (", region_label, ")")
+}
+
+build_xgb_case_path <- function(case_name, row_index) {
+  path_rounds <- as.integer(colnames(xgb_path_pd_matrix))
+  path_scores <- as.numeric(xgb_path_score_matrix[row_index, ])
+  path_pds <- as.numeric(xgb_path_pd_matrix[row_index, ])
+  checkpoint_label <- c(
+    "0 (base)",
+    paste0(path_rounds[-1], " (+", diff(path_rounds), " trees)")
+  )
+  data.frame(
+    case = case_name,
+    checkpoint = checkpoint_label,
+    score_change = c(
+      "",
+      fmt_num(diff(path_scores), 4)
+    ),
+    running_score = fmt_num(path_scores, 4),
+    predicted_PD = fmt_pct(path_pds, 2),
+    check.names = FALSE
+  )
+}
+
+xgb_round_path <- do.call(
+  rbind,
+  Map(build_xgb_case_path, names(xgb_case_indices), xgb_case_indices)
+)
+
+xgb_profile_quantities <- c(
+  "Test-set row",
+  "Observed outcome",
+  "Age",
+  "Interest rate",
+  "Grade",
+  "Loan amount",
+  "Income",
+  "Employment length",
+  "Home ownership",
+  "Sex",
+  "Region",
+  "Base PD",
+  "PD after 5 rounds",
+  "PD after 20 rounds",
+  "Full XGBoost PD"
+)
+
+xgb_case_profile_values <- lapply(xgb_case_indices, function(row_index) {
+  applicant_i <- test[row_index, ]
+  c(
+    row_index,
+    ifelse(actual_default_tree[row_index] == 1, "Default", "No default"),
+    applicant_i$age,
+    format_rate(applicant_i$int),
+    as.character(applicant_i$grade),
+    format_money_value(applicant_i$l_amnt),
+    format_money_value(applicant_i$income),
+    format_emp_len_value(applicant_i$emp_len),
+    as.character(applicant_i$home),
+    format_sex_value(applicant_i$sex),
+    format_region_value(applicant_i$region),
+    fmt_pct(xgb_base_pd, 2),
+    fmt_pct(xgb_path_pd_matrix[row_index, "5"], 2),
+    fmt_pct(xgb_path_pd_matrix[row_index, "20"], 2),
+    fmt_pct(xgb_path_pd_matrix[row_index, as.character(xgb_nrounds)], 2)
+  )
+})
+
+xgb_applicant_profile <- data.frame(
+  Quantity = xgb_profile_quantities,
+  check.names = FALSE
+)
+xgb_applicant_profile[names(xgb_case_indices)] <- xgb_case_profile_values
+
+xgb_loss_check <- data.frame(
+  case = names(xgb_case_indices),
+  observed_outcome = ifelse(
+    actual_default_tree[xgb_case_indices] == 1,
+    "Default",
+    "No default"
+  ),
+  base_PD = fmt_pct(rep(xgb_base_pd, length(xgb_case_indices)), 2),
+  PD_after_5_rounds = fmt_pct(
+    xgb_path_pd_matrix[xgb_case_indices, "5"],
+    2
+  ),
+  full_xgboost_PD = fmt_pct(
+    xgb_path_pd_matrix[xgb_case_indices, as.character(xgb_nrounds)],
+    2
+  ),
+  base_log_loss = fmt_num(xgb_base_loss[xgb_case_indices], 4),
+  full_log_loss = fmt_num(xgb_full_loss[xgb_case_indices], 4),
+  loss_reduction = fmt_num(xgb_loss_gain[xgb_case_indices], 4),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_applicant_profile,
+  caption = "Applicants selected to inspect two XGBoost checkpoint paths.",
+  row.names = FALSE
+)
+```
+
+### Table 2.7 {#result-table-2-7}
+
+```{r table-2-7}
+companion_kable(
+  xgb_round_path,
+  caption = "Selected XGBoost checkpoint corrections for two applicants.",
+  row.names = FALSE
+)
+```
+
+### Table 2.8 {#result-table-2-8}
+
+```{r table-2-8}
+xgb_loss_display <- data.frame(
+  Measure = c("Observed outcome", "Base PD", "PD after 5 rounds",
+              "Final XGBoost PD", "Base log-loss", "Final log-loss",
+              "Log-loss reduction"),
+  `Default case` = unname(unlist(xgb_loss_check[1, -1])),
+  `Non-default case` = unname(unlist(xgb_loss_check[2, -1])),
+  check.names = FALSE
+)
+companion_kable(
+  xgb_loss_display,
+  caption = "Individual log-loss check for the two selected applicants.",
+  row.names = FALSE
+)
+```
+
+### Tracing the first two boosting rounds
+
+```{r step-022}
+xgb_tree_table <- as.data.frame(
+  xgboost::xgb.model.dt.tree(model = xgb_full_checkpoint_model)
+)
+xgb_leaf_matrix <- predict(
+  xgb_full_checkpoint_model,
+  newdata = xgb_test,
+  predleaf = TRUE
+)
+if (is.null(dim(xgb_leaf_matrix))) {
+  xgb_leaf_matrix <- matrix(xgb_leaf_matrix, ncol = xgb_nrounds)
+}
+
+xgb_first_five_models <- lapply(seq_len(5), function(rounds) {
+  set.seed(567)
+  xgboost::xgb.train(
+    params = xgb_params,
+    data = xgb_train,
+    nrounds = rounds,
+    verbose = 0
+  )
+})
+
+xgb_default_applicant <- xgb_test[xgb_default_index, ]
+xgb_default_leaf_matrix <- predict(
+  xgb_full_checkpoint_model,
+  newdata = xgb_default_applicant,
+  predleaf = TRUE
+)
+
+xgb_first_five_scores <- sapply(
+  xgb_first_five_models,
+  function(model_i) predict(
+    model_i,
+    newdata = xgb_default_applicant,
+    outputmargin = TRUE
+  )
+)
+
+xgb_first_five_scores <- as.numeric(xgb_first_five_scores)
+xgb_first_five_previous_scores <- c(xgb_base_score, xgb_first_five_scores[-5])
+xgb_first_five_observed_changes <- xgb_first_five_scores -
+  xgb_first_five_previous_scores
+xgb_first_five_selected_leaf <- as.integer(
+  xgb_default_leaf_matrix[seq_len(5)]
+)
+
+xgb_leaf_value_for_round <- function(round_number, leaf_id) {
+  tree_rows <- xgb_tree_table[xgb_tree_table$Tree == round_number - 1, ]
+  leaf_row <- tree_rows[
+    tree_rows$Feature == "Leaf" &
+      tree_rows$Node == leaf_id,
+  ]
+  if (nrow(leaf_row) == 0) {
+    leaf_row <- tree_rows[
+      tree_rows$Feature == "Leaf" &
+        tree_rows$ID == paste0(round_number - 1, "-", leaf_id),
+    ]
+  }
+  if (nrow(leaf_row) == 0) {
+    return(NA_real_)
+  }
+  value_column <- intersect(c("Quality", "Gain", "Weight"), names(leaf_row))[1]
+  if (is.na(value_column)) {
+    return(NA_real_)
+  }
+  as.numeric(leaf_row[[value_column]][1])
+}
+
+xgb_first_five_leaf_values <- vapply(
+  seq_len(5),
+  function(round_i) {
+    xgb_leaf_value_for_round(
+      round_number = round_i,
+      leaf_id = xgb_first_five_selected_leaf[round_i]
+    )
+  },
+  numeric(1)
+)
+
+xgb_round_1_leaf <- xgb_first_five_selected_leaf[1]
+xgb_round_1_leaf_value <- xgb_first_five_leaf_values[1]
+xgb_round_1_score <- xgb_first_five_scores[1]
+xgb_round_1_pd <- plogis(xgb_round_1_score)
+xgb_round_1_logistic_exponent <- -xgb_round_1_score
+xgb_round_2_leaf <- xgb_first_five_selected_leaf[2]
+xgb_round_2_leaf_value <- xgb_first_five_leaf_values[2]
+xgb_round_2_score <- xgb_first_five_scores[2]
+xgb_round_2_pd <- plogis(xgb_round_2_score)
+xgb_round_2_logistic_exponent <- -xgb_round_2_score
+```
+
+### Table 2.9 {#result-table-2-9}
+
+```{r table-2-9}
+html_code <- function(x) {
+  if (knitr::is_latex_output()) return(paste0("`", x, "`"))
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  paste0("<code>", x, "</code>")
+}
+
+math_inline <- function(x) {
+  if (knitr::is_latex_output()) {
+    x <- gsub("<sub>([^<]*)</sub>", "_{\\1}", x)
+    x <- gsub("log(", "\\log(", x, fixed = TRUE)
+    x <- gsub("exp(", "\\exp(", x, fixed = TRUE)
+    return(paste0("$", x, "$"))
+  }
+  paste0("<span class=\"math-table\">", x, "</span>")
+}
+
+xgb_round_1_calculation <- data.frame(
+  step = 1:12,
+  expression = c(
+    html_code(paste0("xgb_default_index <- ", xgb_default_index)),
+    html_code("mean(xgb_train_label)"),
+    math_inline(paste0(
+      "F<sub>0</sub> = log(",
+      fmt_num(xgb_base_pd, 5),
+      " / (1 - ",
+      fmt_num(xgb_base_pd, 5),
+      "))"
+    )),
+    html_code(paste0(
+      "xgb_default_applicant <- xgb_test[",
+      xgb_default_index,
+      ", ]"
+    )),
+    html_code(
+      "leaf_id_1 <- predict(xgb_full_checkpoint_model, newdata = xgb_default_applicant, predleaf = TRUE)[1, 1]"
+    ),
+    html_code(paste0(
+      "leaf_value_1 <- xgb_leaf_value_for_round(1, ",
+      xgb_round_1_leaf,
+      ")"
+    )),
+    math_inline(paste0(
+      "F<sub>1</sub> = ",
+      fmt_num(xgb_base_score, 4),
+      " + ",
+      fmt_num(xgb_round_1_leaf_value, 4)
+    )),
+    math_inline(paste0(
+      "PD<sub>1</sub> = 1 / (1 + exp(",
+      fmt_num(xgb_round_1_logistic_exponent, 4),
+      "))"
+    )),
+    html_code(
+      "leaf_id_2 <- predict(xgb_full_checkpoint_model, newdata = xgb_default_applicant, predleaf = TRUE)[1, 2]"
+    ),
+    html_code(paste0(
+      "leaf_value_2 <- xgb_leaf_value_for_round(2, ",
+      xgb_round_2_leaf,
+      ")"
+    )),
+    math_inline(paste0(
+      "F<sub>2</sub> = ",
+      fmt_num(xgb_round_1_score, 4),
+      " + ",
+      fmt_num(xgb_round_2_leaf_value, 4)
+    )),
+    math_inline(paste0(
+      "PD<sub>2</sub> = 1 / (1 + exp(",
+      fmt_num(xgb_round_2_logistic_exponent, 4),
+      "))"
+    ))
+  ),
+  value = c(
+    xgb_default_index,
+    fmt_pct(xgb_base_pd, 3),
+    fmt_num(xgb_base_score, 4),
+    paste0("one feature row: applicant ", xgb_default_index),
+    paste0("leaf_id_1 = ", xgb_round_1_leaf),
+    paste0("leaf_value_1 = ", fmt_num(xgb_round_1_leaf_value, 4)),
+    fmt_num(xgb_round_1_score, 4),
+    fmt_pct(xgb_round_1_pd, 2),
+    paste0("leaf_id_2 = ", xgb_round_2_leaf),
+    paste0("leaf_value_2 = ", fmt_num(xgb_round_2_leaf_value, 4)),
+    fmt_num(xgb_round_2_score, 4),
+    fmt_pct(xgb_round_2_pd, 2)
+  ),
+  meaning = c(
+    "Selected test-set applicant followed in this example.",
+    "Training-sample default rate; the starting PD for all applicants.",
+    "Starting score on the log-odds scale.",
+    paste0(
+      "Extracts the feature row for applicant ",
+      xgb_default_index,
+      ". The result is a one-row feature vector, not one scalar."
+    ),
+    paste0(
+      "Runs applicant ",
+      xgb_default_index,
+      "'s feature row through tree 1 and returns the reached leaf number."
+    ),
+    "Looks up the score correction stored in that tree-1 leaf.",
+    "Updated score after the first boosting round.",
+    "Updated predicted probability of default after one boosting round.",
+    paste0(
+      "Runs applicant ",
+      xgb_default_index,
+      "'s feature row through tree 2 and returns the reached leaf number."
+    ),
+    "Looks up the score correction stored in that tree-2 leaf.",
+    "Adds the second-round correction to the previous score.",
+    "Updated predicted probability of default after two boosting rounds."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_round_1_calculation,
+  caption = paste0(
+    "First two XGBoost rounds for test-set applicant ",
+    xgb_default_index,
+    ": code values and algebraic updates."
+  ),
+  col.names = c(
+    "Step",
+    "Expression",
+    "Value",
+    "Meaning"
+  ),
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+### Following the score across boosting rounds
+
+### Table 2.10 {#result-table-2-10}
+
+```{r table-2-10}
+xgb_first_five_arithmetic <- data.frame(
+  round = 0:5,
+  code_value = c(
+    html_code("mean(xgb_train_label)"),
+    paste0("leaf ", xgb_first_five_selected_leaf,
+           " value = ", fmt_num(xgb_first_five_leaf_values, 4))
+  ),
+  algebraic_update = c(
+    math_inline(paste0("F<sub>0</sub> = ", fmt_num(xgb_base_score, 4))),
+    mapply(
+      function(round_i, previous_score, leaf_value, score) {
+        math_inline(paste0(
+          "F<sub>",
+          round_i,
+          "</sub> = ",
+          fmt_num(previous_score, 4),
+          " + ",
+          fmt_num(leaf_value, 4),
+          " = ",
+          fmt_num(score, 4)
+        ))
+      },
+      seq_len(5),
+      xgb_first_five_previous_scores,
+      xgb_first_five_leaf_values,
+      xgb_first_five_scores
+    )
+  ),
+  predicted_PD = fmt_pct(plogis(c(xgb_base_score, xgb_first_five_scores)), 2),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_first_five_arithmetic,
+  caption = paste0(
+    "First five boosting rounds for test-set applicant ",
+    xgb_default_index,
+    ": code value, score update, and PD."
+  ),
+  col.names = c(
+    "Round",
+    "Code value used",
+    "Algebraic score update",
+    "Predicted PD"
+  ),
+  row.names = FALSE,
+  escape = FALSE
+)
+```
+
+```{r step-025}
+xgb_pd_path <- do.call(
+  rbind,
+  lapply(names(xgb_case_indices), function(case_name) {
+    row_index <- xgb_case_indices[[case_name]]
+    data.frame(
+      case = case_name,
+      round = as.integer(colnames(xgb_path_pd_matrix)),
+      predicted_pd = as.numeric(xgb_path_pd_matrix[row_index, ]),
+      score = as.numeric(xgb_path_score_matrix[row_index, ])
+    )
+  })
+)
+xgb_checkpoint_plot <- ggplot(xgb_pd_path,
+                             aes(x = round, y = predicted_pd, color = case)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.5)
+```
+
+### Figure 2.2 {#result-figure-2-2}
+
+```{r figure-2-2}
+#| fig-width: 5.5
+#| fig-height: 4.7
+#| fig-cap: "Figure 2.2. Predicted PD for two applicants as XGBoost boosting rounds accumulate."
+xgb_pd_path$label <- paste0(
+  "PD = ",
+  fmt_pct(xgb_pd_path$predicted_pd, 1)
+)
+xgb_pd_path$label_x <- xgb_pd_path$round
+xgb_pd_path$label_x[xgb_pd_path$round == xgb_nrounds] <- xgb_nrounds - 9
+xgb_pd_path$label_y <- xgb_pd_path$predicted_pd
+xgb_pd_path$label_y[
+  xgb_pd_path$case == "Default case"
+] <- xgb_pd_path$label_y[xgb_pd_path$case == "Default case"] + 0.035
+xgb_pd_path$label_y[
+  xgb_pd_path$case == "Non-default case" & xgb_pd_path$round == 5
+] <- xgb_pd_path$label_y[
+  xgb_pd_path$case == "Non-default case" & xgb_pd_path$round == 5
+] - 0.030
+xgb_pd_path$label_y[
+  xgb_pd_path$case == "Non-default case" & xgb_pd_path$round != 5
+] <- xgb_pd_path$label_y[
+  xgb_pd_path$case == "Non-default case" & xgb_pd_path$round != 5
+] + 0.030
+
+xgb_labeled_rounds <- c(5, 60)
+xgb_pd_label_path <- xgb_pd_path[xgb_pd_path$round %in% xgb_labeled_rounds, ]
+xgb_pd_label_path$label_x <- c(35, 55, 35, 75)
+xgb_pd_label_path$label_y <- c(0.28, 0.74, 0.18, 0.08)
+xgb_pd_label_path$label <- paste0("Round ", xgb_pd_label_path$round,
+                                 "\nPD = ", fmt_pct(xgb_pd_label_path$predicted_pd, 1))
+xgb_base_label <- data.frame(
+  x = 115,
+  y = xgb_base_pd + 0.035,
+  label = paste0("Base PD = ", fmt_pct(xgb_base_pd, 1))
+)
+xgb_full_reference <- data.frame(
+  case = names(xgb_case_indices),
+  full_pd = as.numeric(
+    xgb_path_pd_matrix[xgb_case_indices, as.character(xgb_nrounds)]
+  )
+)
+xgb_full_reference$label <- paste0(
+  "Full = ",
+  fmt_pct(xgb_full_reference$full_pd, 1)
+)
+xgb_full_reference$label_x <- 118
+xgb_full_reference$label_y <- xgb_full_reference$full_pd + 0.035
+
+xgb_y_limits <- range(c(xgb_pd_path$predicted_pd, xgb_full_reference$full_pd))
+xgb_y_limits <- c(max(0, xgb_y_limits[1] - 0.060), xgb_y_limits[2] + 0.075)
+
+xgb_checkpoint_plot +
+  geom_hline(
+    yintercept = xgb_base_pd,
+    linetype = "dashed",
+    linewidth = 0.35,
+    color = book_plot_colors[["reference"]]
+  ) +
+  geom_segment(
+    data = xgb_full_reference,
+    aes(x = 0, xend = xgb_nrounds, y = full_pd, yend = full_pd, color = case),
+    inherit.aes = FALSE,
+    linetype = "dotted",
+    linewidth = 0.35,
+    alpha = 0.7
+  ) +
+  geom_segment(
+    data = xgb_pd_label_path,
+    aes(x = round, y = predicted_pd, xend = label_x, yend = label_y),
+    linewidth = 0.3, alpha = 0.65, show.legend = FALSE
+  ) +
+  geom_label(
+    data = xgb_pd_label_path,
+    aes(x = label_x, y = label_y, label = label, color = case),
+    size = 3.05,
+    label.size = 0,
+    fill = "white",
+    label.padding = grid::unit(0.18, "lines"),
+    show.legend = FALSE
+  ) +
+  geom_label(
+    data = xgb_base_label,
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    size = 3.05,
+    label.size = 0,
+    fill = "white",
+    color = "gray25",
+    label.padding = grid::unit(0.18, "lines")
+  ) +
+  geom_label(
+    data = xgb_full_reference,
+    aes(x = label_x, y = label_y, label = label, color = case),
+    inherit.aes = FALSE,
+    size = 3.0,
+    label.size = 0,
+    fill = "white",
+    label.padding = grid::unit(0.16, "lines"),
+    show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    breaks = c(0, 20, 60, 100, xgb_nrounds),
+    limits = c(0, xgb_nrounds)
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = xgb_y_limits
+  ) +
+  scale_color_manual(
+    values = c("Default case" = book_plot_colors[["risk"]],
+               "Non-default case" = book_plot_colors[["primary"]])
+  ) +
+  labs(
+    x = "Boosting round",
+    y = "Predicted probability of default",
+    color = NULL,
+    caption = "Dashed reference: base PD. Dotted references: final PDs."
+  ) +
+  book_figure_theme() +
+  theme(
+    legend.position = "bottom",
+    plot.caption = element_text(color = "gray35"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+## 2.5 Estimating the final XGBoost model
+
+### Table 2.11 {#result-table-2-11}
+
+```{r table-2-11}
+xgb_estimation_inputs <- data.frame(
+  Argument = c(
+    "params = xgb_params",
+    "data = xgb_train",
+    "nrounds = xgb_nrounds",
+    "evals = list(train = xgb_train, test = xgb_test)",
+    "verbose = 0"
+  ),
+  Role = c(
+    "Objective, evaluation metrics, learning rate, depth, regularization, and sampling choices.",
+    "Encoded training matrix with the observed default labels.",
+    "Number of boosted trees added to the score.",
+    "Training and test matrices used to store diagnostic metrics during estimation.",
+    "Suppresses console printing; it does not change the estimated model."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_estimation_inputs,
+  caption = "Inputs used by the XGBoost estimation call.",
+  row.names = FALSE
+)
+```
+
+```{r step-028}
+set.seed(567)
+xgb_model <- xgboost::xgb.train(
+  params = xgb_params,
+  data = xgb_train,
+  nrounds = xgb_nrounds,
+  evals = list(train = xgb_train, test = xgb_test),
+  verbose = 0
+)
+
+pred_xgb <- predict(xgb_model, newdata = xgb_test)
+ROC_xgb <- pROC::roc(test$loan_st, pred_xgb, quiet = TRUE)
+```
+
+```{r step-029}
+pred_xgb_train <- predict(xgb_model, newdata = xgb_train)
+ROC_xgb_train <- pROC::roc(train$loan_st, pred_xgb_train, quiet = TRUE)
+
+xgb_estimation_log_loss <- function(actual, predicted_pd) {
+  predicted_pd <- pmin(pmax(predicted_pd, 1e-8), 1 - 1e-8)
+  mean(-(actual * log(predicted_pd) +
+           (1 - actual) * log(1 - predicted_pd)))
+}
+
+xgb_train_auc_estimated <- as.numeric(auc(ROC_xgb_train))
+xgb_test_auc_estimated <- as.numeric(auc(ROC_xgb))
+xgb_test_logloss_estimated <- xgb_estimation_log_loss(
+  actual_default_tree,
+  pred_xgb
+)
+```
+
+### Table 2.12 {#result-table-2-12}
+
+```{r table-2-12}
+xgb_fitted_summary <- data.frame(
+  Quantity = c(
+    "Fitted object",
+    "Training applicants",
+    "Test applicants",
+    "Encoded predictors",
+    "Boosting rounds",
+    "Learning rate",
+    "Maximum tree depth",
+    "Predicted test-set PDs",
+    "Final train AUC",
+    "Final test AUC",
+    "Final test log-loss",
+    "Test Brier score"
+  ),
+  Value = c(
+    "xgb_model",
+    fmt_int(nrow(xgb_train_matrix)),
+    fmt_int(nrow(xgb_test_matrix)),
+    fmt_int(ncol(xgb_train_matrix)),
+    fmt_int(xgb_nrounds),
+    fmt_num(xgb_params$eta, 2),
+    fmt_int(xgb_params$max_depth),
+    fmt_int(length(pred_xgb)),
+    fmt_num(xgb_train_auc_estimated, 4),
+    fmt_num(xgb_test_auc_estimated, 4),
+    fmt_num(xgb_test_logloss_estimated, 4),
+    fmt_num(brier_score(actual_default_tree, pred_xgb), 4)
+  )
+)
+
+companion_kable(
+  xgb_fitted_summary,
+  caption = "Estimated XGBoost model summary.",
+  row.names = FALSE
+)
+```
+
+```{r step-031}
+xgb_final_pd_plot_data <- data.frame(
+  predicted_pd = c(pred_logi_full, pred_xgb),
+  model = factor(
+    rep(c("Full logistic model", "XGBoost"), each = length(pred_xgb)),
+    levels = c("Full logistic model", "XGBoost")
+  )
+)
+xgb_logistic_pd_quantiles <- quantile(
+  pred_logi_full,
+  probs = c(0.50, 0.90, 0.95, 0.99)
+)
+xgb_final_pd_quantiles <- quantile(
+  pred_xgb,
+  probs = c(0.50, 0.90, 0.95, 0.99)
+)
+
+xgb_distribution_plot <- ggplot(
+  xgb_final_pd_plot_data,
+  aes(x = predicted_pd, color = model, fill = model)
+) +
+  geom_density(
+    alpha = 0.20,
+    linewidth = 0.8
+  )
+```
+
+### Figure 2.3 {#result-figure-2-3}
+
+```{r figure-2-3}
+#| fig-width: 5.5
+#| fig-height: 4.2
+#| fig-cap: "Figure 2.3. Final predicted PD distributions for the full logistic model and XGBoost."
+xgb_distribution_plot +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_color_manual(
+    values = setNames(book_tree_colors[c("logi_full", "xgboost")],
+                      c("Full logistic model", "XGBoost"))
+  ) +
+  scale_fill_manual(
+    values = setNames(book_tree_colors[c("logi_full", "xgboost")],
+                      c("Full logistic model", "XGBoost"))
+  ) +
+  labs(
+    x = "Predicted PD",
+    y = "Density",
+    color = "Model",
+    fill = "Model"
+  ) +
+  book_figure_theme() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r step-033}
+xgb_logistic_pd_comparison <- data.frame(
+  logistic_pd = pred_logi_full,
+  xgboost_pd = pred_xgb,
+  observed_outcome = factor(
+    actual_default_tree,
+    levels = c(0, 1),
+    labels = c("No default", "Default")
+  )
+)
+xgb_pd_comparison_limit <- max(
+  xgb_logistic_pd_comparison$logistic_pd,
+  xgb_logistic_pd_comparison$xgboost_pd
+) * 1.04
+xgb_above_logistic_share <- mean(
+  xgb_logistic_pd_comparison$xgboost_pd >
+    xgb_logistic_pd_comparison$logistic_pd
+)
+xgb_below_logistic_share <- mean(
+  xgb_logistic_pd_comparison$xgboost_pd <
+    xgb_logistic_pd_comparison$logistic_pd
+)
+xgb_default_rows <- xgb_logistic_pd_comparison$observed_outcome == "Default"
+xgb_nondefault_rows <- xgb_logistic_pd_comparison$observed_outcome == "No default"
+xgb_above_logistic_default_share <- mean(
+  xgb_logistic_pd_comparison$xgboost_pd[xgb_default_rows] >
+    xgb_logistic_pd_comparison$logistic_pd[xgb_default_rows]
+)
+xgb_below_logistic_nondefault_share <- mean(
+  xgb_logistic_pd_comparison$xgboost_pd[xgb_nondefault_rows] <
+    xgb_logistic_pd_comparison$logistic_pd[xgb_nondefault_rows]
+)
+xgb_default_median_logistic_pd <- median(
+  xgb_logistic_pd_comparison$logistic_pd[xgb_default_rows]
+)
+xgb_default_median_xgboost_pd <- median(
+  xgb_logistic_pd_comparison$xgboost_pd[xgb_default_rows]
+)
+xgb_nondefault_median_logistic_pd <- median(
+  xgb_logistic_pd_comparison$logistic_pd[xgb_nondefault_rows]
+)
+xgb_nondefault_median_xgboost_pd <- median(
+  xgb_logistic_pd_comparison$xgboost_pd[xgb_nondefault_rows]
+)
+
+xgb_scatter_plot <- ggplot(
+  xgb_logistic_pd_comparison,
+  aes(x = logistic_pd, y = xgboost_pd, color = observed_outcome)
+) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linetype = "dashed",
+    linewidth = 0.35,
+    color = book_plot_colors[["reference"]]
+  ) +
+  geom_point(alpha = 0.22, size = 1.45) +
+  facet_wrap(~ observed_outcome, nrow = 1)
+```
+
+### Figure 2.4 {#result-figure-2-4}
+
+```{r figure-2-4}
+#| fig-width: 5.5
+#| fig-height: 3.8
+#| fig-cap: "Figure 2.4. Full logistic-model PDs compared with final XGBoost PDs by observed outcome."
+xgb_scatter_plot +
+  coord_equal(
+    xlim = c(0, xgb_pd_comparison_limit),
+    ylim = c(0, xgb_pd_comparison_limit)
+  ) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1),
+                     breaks = seq(0, 1, 0.2)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     breaks = seq(0, 1, 0.2)) +
+  scale_color_manual(
+    values = c("No default" = book_plot_colors[["reference"]],
+               "Default" = book_plot_colors[["risk"]]),
+    guide = "none"
+  ) +
+  labs(
+    x = "Full logistic-model PD",
+    y = "XGBoost PD"
+  ) +
+  book_figure_theme() +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Checking performance over boosting rounds
+
+```{r step-035}
+xgb_round_grid <- seq(20, xgb_nrounds, 20)
+xgb_learning_curve <- do.call(
+  rbind,
+  lapply(xgb_round_grid, function(rounds) {
+    set.seed(567)
+    model_i <- xgboost::xgb.train(
+      params = xgb_params,
+      data = xgb_train,
+      nrounds = rounds,
+      verbose = 0
+    )
+
+    pred_train_i <- predict(model_i, newdata = xgb_train)
+    pred_test_i <- predict(model_i, newdata = xgb_test)
+
+    data.frame(
+      rounds = rounds,
+      series = c("Train AUC", "Test AUC"),
+      auc = c(
+        as.numeric(pROC::auc(train$loan_st, pred_train_i, quiet = TRUE)),
+        as.numeric(pROC::auc(test$loan_st, pred_test_i, quiet = TRUE))
+      )
+    )
+  })
+)
+```
+
+```{r step-036}
+xgb_final_round <- max(xgb_learning_curve$rounds)
+xgb_final_train_auc <- xgb_learning_curve$auc[
+  xgb_learning_curve$rounds == xgb_final_round &
+    xgb_learning_curve$series == "Train AUC"
+]
+xgb_final_test_auc <- xgb_learning_curve$auc[
+  xgb_learning_curve$rounds == xgb_final_round &
+    xgb_learning_curve$series == "Test AUC"
+]
+xgb_final_auc_gap <- xgb_final_train_auc - xgb_final_test_auc
+xgb_test_curve <- xgb_learning_curve[xgb_learning_curve$series == "Test AUC", ]
+xgb_train_curve <- xgb_learning_curve[xgb_learning_curve$series == "Train AUC", ]
+xgb_best_test_row <- xgb_test_curve[which.max(xgb_test_curve$auc), ]
+xgb_previous_test_auc <- xgb_test_curve$auc[nrow(xgb_test_curve) - 1]
+xgb_test_auc_last_change <- xgb_final_test_auc - xgb_previous_test_auc
+xgb_test_auc_declines_after_best <- xgb_best_test_row$rounds < xgb_final_round &&
+  xgb_final_test_auc < xgb_best_test_row$auc
+```
+
+```{r step-037}
+xgb_learning_plot <- ggplot(xgb_learning_curve,
+                           aes(x = rounds, y = auc, color = series,
+                               linetype = series)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2)
+```
+
+### Figure 2.5 {#result-figure-2-5}
+
+```{r figure-2-5}
+#| fig-width: 5.5
+#| fig-height: 4.2
+#| fig-cap: "Figure 2.5. XGBoost learning curve: test AUC with train AUC as a diagnostic reference."
+xgb_learning_plot +
+  scale_color_manual(values = c("Train AUC" = book_plot_colors[["reference"]],
+                                "Test AUC" = book_tree_colors[["xgboost"]])) +
+  scale_linetype_manual(values = c("Train AUC" = "dashed", "Test AUC" = "solid")) +
+  labs(x = "Boosting round", y = "AUC", color = "Series", linetype = "Series") +
+  book_figure_theme() +
+  theme(legend.position = "bottom")
+```
+
+### Table 2.13 {#result-table-2-13}
+
+```{r table-2-13}
+xgb_overfitting_check <- data.frame(
+  Check = c(
+    "Best test AUC in the grid",
+    "Final test AUC",
+    "Change in test AUC from previous checkpoint",
+    "Final train AUC",
+    "Final train-test AUC gap",
+    "Test AUC declines after its best checkpoint?"
+  ),
+  Value = c(
+    paste0(
+      fmt_num(xgb_best_test_row$auc, 4),
+      " at ",
+      fmt_int(xgb_best_test_row$rounds),
+      " rounds"
+    ),
+    fmt_num(xgb_final_test_auc, 4),
+    fmt_num(xgb_test_auc_last_change, 4),
+    fmt_num(xgb_final_train_auc, 4),
+    fmt_num(xgb_final_auc_gap, 4),
+    ifelse(xgb_test_auc_declines_after_best, "Yes", "No")
+  ),
+  Reading = c(
+    "Highest out-of-sample ranking result among the inspected checkpoints.",
+    "Ranking result for the model used in the chapter.",
+    "Positive values mean the last added rounds still improved test ranking.",
+    "In-sample ranking result.",
+    "Larger gaps call for validation, calibration, and monitoring.",
+    "A decline would be direct evidence that additional rounds are hurting test ranking."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_overfitting_check,
+  caption = "Direct overfitting diagnostic from the XGBoost learning curve.",
+  row.names = FALSE
+)
+```
+
+### Table 2.14 {#result-table-2-14}
+
+```{r table-2-14}
+xgb_validation_workflow <- data.frame(
+  Stage = c(
+    "Training",
+    "Validation or cross-validation",
+    "Final holdout test",
+    "Monitoring after deployment"
+  ),
+  `What it answers` = c(
+    "Which patterns can the model learn from historical applications?",
+    "Which hyperparameters give stable out-of-sample behavior?",
+    "How well does the chosen model perform on untouched borrowers?",
+    "Do ranking, calibration, bad rates, and approval patterns remain stable over time?"
+  ),
+  `Typical XGBoost checks` = c(
+    "Fit shallow boosted trees with regularization and subsampling.",
+    "Tune rounds, depth, learning rate, minimum child weight, subsampling, and calibration.",
+    "Report AUC, Brier score, calibration, bad rates, and payoff once.",
+    "Track drift, overrides, calibration decay, fairness checks, and reject-inference issues."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  xgb_validation_workflow,
+  caption = "Estimation, tuning, final evaluation and monitoring for XGBoost credit scoring.",
+  row.names = FALSE
+)
+```
+
+```{r step-041}
+xgb_prediction_summary <- c(
+  minimum_PD = min(pred_xgb), median_PD = median(pred_xgb),
+  maximum_PD = max(pred_xgb), AUC = as.numeric(auc(ROC_xgb)),
+  Brier = brier_score(actual_default_tree, pred_xgb)
+)
+```
+
+### Table 2.15 {#result-table-2-15}
+
+```{r table-2-15}
+xgb_prediction_range_table <- data.frame(
+  Quantity = c(
+    "Minimum predicted PD",
+    "Median predicted PD",
+    "Maximum predicted PD",
+    "AUC",
+    "Brier score"
+  ),
+  Value = c(
+    fmt_pct(min(pred_xgb), 2),
+    fmt_pct(median(pred_xgb), 2),
+    fmt_pct(max(pred_xgb), 2),
+    fmt_num(as.numeric(auc(ROC_xgb)), 4),
+    fmt_num(brier_score(actual_default_tree, pred_xgb), 4)
+  )
+)
+
+companion_kable(
+  xgb_prediction_range_table,
+  caption = "XGBoost prediction range and test-set performance summary.",
+  row.names = FALSE
+)
+```
+
+## 2.6 Interpreting XGBoost
+
+```{r step-043}
+xgb_importance <- xgboost::xgb.importance(
+  feature_names = colnames(xgb_train_matrix), model = xgb_model
+)
+xgb_gain_plot <- xgb_importance |>
+  slice_max(Gain, n = 12) |>
+  mutate(Feature = reorder(Feature, Gain)) |>
+  ggplot(aes(x = Gain, y = Feature)) +
+  geom_col(fill = book_tree_colors[["xgboost"]])
+```
+
+### Figure 2.6 {#result-figure-2-6}
+
+```{r figure-2-6}
+#| fig-width: 5.5
+#| fig-height: 4.5
+#| fig-cap: "Figure 2.6. XGBoost feature importance."
+xgb_gain_plot +
+  labs(x = "Gain", y = "Feature") +
+  book_figure_theme()
+```
+
+```{r step-045}
+xgb_top_gain_features <- xgb_importance |>
+  slice_max(Gain, n = 3) |>
+  pull(Feature)
+xgb_top_shap_features <- xgb_shap_importance |>
+  slice_max(mean_abs_shap, n = 3) |>
+  pull(feature)
+```
+
+### Contributions to the predicted score
+
+```{r step-046}
+xgb_shap <- predict(xgb_model, newdata = xgb_test, predcontrib = TRUE)
+xgb_shap_df <- as.data.frame(xgb_shap)
+xgb_baseline_name <- intersect(c("BIAS", "(Intercept)"), names(xgb_shap_df))[1]
+xgb_shap_no_bias <- xgb_shap_df[, names(xgb_shap_df) != xgb_baseline_name,
+                               drop = FALSE]
+xgb_shap_importance <- data.frame(
+  feature = names(xgb_shap_no_bias),
+  mean_abs_shap = colMeans(abs(xgb_shap_no_bias))
+) |> arrange(desc(mean_abs_shap))
+
+xgb_shap_plot <- xgb_shap_importance |>
+  slice_max(mean_abs_shap, n = 12) |>
+  mutate(feature = reorder(feature, mean_abs_shap)) |>
+  ggplot(aes(x = mean_abs_shap, y = feature)) +
+  geom_col(fill = book_tree_colors[["xgboost"]])
+```
+
+### Figure 2.7 {#result-figure-2-7}
+
+```{r figure-2-7}
+#| fig-width: 5.5
+#| fig-height: 4.5
+#| fig-cap: "Figure 2.7. Average absolute XGBoost contribution by feature."
+xgb_shap_plot +
+  labs(x = "Mean absolute contribution", y = "Feature") +
+  book_figure_theme()
+```
+
+### Explaining individual applicants' predictions
+
+```{r step-048}
+john_doe_index <- match("6", rownames(test))
+selected_prediction_indices <- c(
+  john_doe_index,
+  xgb_default_index,
+  xgb_nondefault_index
+)
+selected_prediction_cases <- c(
+  "John Doe",
+  "Selected default case",
+  "Selected non-default case"
+)
+
+selected_prediction_table <- data.frame(
+  applicant = rep(selected_prediction_cases, each = 3),
+  test_row = rep(selected_prediction_indices, each = 3),
+  model = rep(c("logi_full", "single_tree", "xgboost"), times = 3),
+  predicted_pd = c(
+    pred_logi_full[selected_prediction_indices[1]],
+    pred_tree_simple[selected_prediction_indices[1]],
+    pred_xgb[selected_prediction_indices[1]],
+    pred_logi_full[selected_prediction_indices[2]],
+    pred_tree_simple[selected_prediction_indices[2]],
+    pred_xgb[selected_prediction_indices[2]],
+    pred_logi_full[selected_prediction_indices[3]],
+    pred_tree_simple[selected_prediction_indices[3]],
+    pred_xgb[selected_prediction_indices[3]]
+  ),
+  observed_default = rep(
+    actual_default_tree[selected_prediction_indices],
+    each = 3
+  )
+)
+```
+
+### Table 2.16 {#result-table-2-16}
+
+```{r table-2-16}
+selected_prediction_table <- selected_prediction_table |>
+  mutate(
+    predicted_pd = fmt_pct(predicted_pd, 2),
+    observed_default = ifelse(observed_default == 1, "Default", "No default")
+  )
+
+companion_kable(
+  selected_prediction_table,
+  caption = "Predicted PDs for selected test-set applicants.",
+  row.names = FALSE
+)
+```
+
+```{r step-050}
+john_xgb_contrib_raw <- unlist(xgb_shap_df[john_doe_index, ])
+john_xgb_baseline <- unname(john_xgb_contrib_raw[xgb_baseline_name])
+john_xgb_feature_contrib <- john_xgb_contrib_raw[
+  names(john_xgb_contrib_raw) != xgb_baseline_name
+]
+john_xgb_feature_sum <- sum(john_xgb_feature_contrib)
+john_xgb_score <- sum(john_xgb_contrib_raw)
+john_xgb_pd_from_score <- plogis(john_xgb_score)
+```
+
+### Table 2.17 {#result-table-2-17}
+
+```{r table-2-17}
+john_xgb_score_table <- data.frame(
+  Component = c("Baseline score", "Sum of feature contributions", "Total score $F_i$",
+                "PD from the total score", "Direct XGBoost PD"),
+  Value = c(
+    fmt_num(john_xgb_baseline, 4),
+    fmt_num(john_xgb_feature_sum, 4),
+    fmt_num(john_xgb_score, 4),
+    fmt_pct(john_xgb_pd_from_score, 2),
+    fmt_pct(pred_xgb[john_doe_index], 2)
+  )
+)
+
+companion_kable(
+  john_xgb_score_table,
+  caption = "Reconstructing John Doe's XGBoost score and predicted PD.",
+  escape = FALSE,
+  row.names = FALSE
+)
+```
+
+```{r step-052}
+john_xgb_contribution_table <- data.frame(
+  feature = names(john_xgb_feature_contrib),
+  contribution = as.numeric(john_xgb_feature_contrib)
+) |>
+  arrange(desc(abs(contribution))) |>
+  slice_head(n = 8)
+```
+
+### Table 2.18 {#result-table-2-18}
+
+```{r table-2-18}
+john_xgb_contribution_table |>
+  mutate(contribution = fmt_num(contribution, 4)) |>
+  companion_kable(
+    caption = "Largest local XGBoost contributions for John Doe.",
+    row.names = FALSE
+  )
+```
+
+### How predictions respond to one variable
+
+```{r step-054}
+partial_dependence <- function(variable, grid_values) {
+  data.frame(
+    variable = variable,
+    value = grid_values,
+    average_predicted_pd = sapply(grid_values, function(value) {
+      new_data <- test
+      new_data[[variable]] <- value
+      new_matrix <- model.matrix(xgb_formula, data = new_data)[, -1, drop = FALSE]
+      mean(predict(xgb_model, newdata = new_matrix))
+    })
+  )
+}
+partial_dependence_data <- bind_rows(lapply(c("int", "income", "age"), function(variable) {
+  grid_values <- seq(quantile(test[[variable]], 0.05),
+                     quantile(test[[variable]], 0.95), length.out = 40)
+  partial_dependence(variable, grid_values)
+}))
+pd_plot <- partial_dependence_data |>
+  mutate(
+    variable = recode(variable,
+                      "int" = "Interest rate (%)",
+                      "income" = "Income (USD)",
+                      "age" = "Age (years)")
+  ) |>
+  ggplot(aes(x = value, y = average_predicted_pd)) +
+  geom_line(color = book_tree_colors[["xgboost"]], linewidth = 0.8) +
+  facet_wrap(~ variable, scales = "free_x", ncol = 1)
+```
+
+### Figure 2.8 {#result-figure-2-8}
+
+```{r figure-2-8}
+#| fig-width: 5.5
+#| fig-height: 6.3
+#| fig-cap: "Figure 2.8. Partial dependence of XGBoost predicted default probability."
+pd_plot +
+  scale_y_continuous(breaks = seq(0.06, 0.18, by = 0.03),
+                     labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Variable value", y = "Average predicted default probability") +
+  scale_x_continuous(labels = scales::label_number(big.mark = ",")) +
+  book_figure_theme()
+```
+
+```{r step-056}
+pd_interest <- partial_dependence_data[partial_dependence_data$variable == "int", ]
+pd_income <- partial_dependence_data[partial_dependence_data$variable == "income", ]
+pd_age <- partial_dependence_data[partial_dependence_data$variable == "age", ]
+
+pd_interest_low <- pd_interest[which.min(pd_interest$value), ]
+pd_interest_high <- pd_interest[which.max(pd_interest$value), ]
+pd_income_low <- pd_income[which.min(pd_income$value), ]
+pd_income_high <- pd_income[which.max(pd_income$value), ]
+pd_age_min_pd <- min(pd_age$average_predicted_pd)
+pd_age_max_pd <- max(pd_age$average_predicted_pd)
+```
+
+## 2.7 Benchmarking against logistic regression
+
+```{r step-057}
+strategy_curve <- function(model_name, prob_of_default,
+                           acceptance_grid = seq(0.50, 0.95, 0.05),
+                           good_loan_payoff = 1, bad_loan_cost = 5) {
+  do.call(rbind, lapply(acceptance_grid, function(accept_rate) {
+    cutoff <- unname(quantile(prob_of_default, accept_rate))
+    accept <- prob_of_default <= cutoff
+    accepted <- sum(accept)
+    accepted_good <- sum(actual_default_tree[accept] == 0)
+    accepted_defaults <- sum(actual_default_tree[accept] == 1)
+    data.frame(
+      model = model_name, accept_rate = accept_rate,
+      actual_accept_rate = accepted / length(actual_default_tree),
+      cutoff = cutoff, accepted = accepted,
+      accepted_good = accepted_good, accepted_defaults = accepted_defaults,
+      bad_rate = accepted_defaults / accepted,
+      net_payoff = accepted_good * good_loan_payoff - accepted_defaults * bad_loan_cost
+    )
+  }))
+}
+
+calibration_table <- function(model_name, prob_of_default, groups = 10) {
+  data.frame(model = model_name, application_row = as.integer(rownames(test)),
+             observed_default = actual_default_tree, predicted_pd = prob_of_default) |>
+    arrange(model, predicted_pd, application_row) |>
+    group_by(model) |>
+    mutate(risk_decile = ntile(predicted_pd, groups)) |>
+    group_by(model, risk_decile) |>
+    summarize(applications = n(), average_predicted_pd = mean(predicted_pd),
+              observed_default_rate = mean(observed_default),
+              brier_score = mean((predicted_pd - observed_default)^2),
+              .groups = "drop")
+}
+
+constant_default_rate <- rep(mean(actual_default_tree), length(actual_default_tree))
+model_metrics <- data.frame(
+  model = c("logi_full", "single_tree", "xgboost", "constant default rate"),
+  auc = c(as.numeric(auc(ROC_logi_full)), as.numeric(auc(ROC_tree_simple)),
+          as.numeric(auc(ROC_xgb)), NA_real_),
+  brier_score = c(brier_score(actual_default_tree, pred_logi_full),
+                  brier_score(actual_default_tree, pred_tree_simple),
+                  brier_score(actual_default_tree, pred_xgb),
+                  brier_score(actual_default_tree, constant_default_rate))
+)
+baseline_brier <- model_metrics$brier_score[model_metrics$model == "constant default rate"]
+model_metrics$brier_skill <- 1 - model_metrics$brier_score / baseline_brier
+strategy_comparison <- bind_rows(
+  strategy_curve("logi_full", pred_logi_full),
+  strategy_curve("single_tree", pred_tree_simple),
+  strategy_curve("xgboost", pred_xgb)
+)
+calibration_comparison <- bind_rows(
+  calibration_table("logi_full", pred_logi_full),
+  calibration_table("xgboost", pred_xgb)
+)
+```
+
+```{r step-058}
+model_metrics_core <- model_metrics |>
+  filter(model != "constant default rate")
+
+best_auc_row <- model_metrics_core |>
+  slice_max(auc, n = 1, with_ties = FALSE)
+
+best_brier_row <- model_metrics_core |>
+  slice_min(brier_score, n = 1, with_ties = FALSE)
+
+strategy_80 <- strategy_comparison |>
+  filter(abs(accept_rate - 0.80) < 1e-8) |>
+  arrange(bad_rate)
+
+best_strategy_by_model <- strategy_comparison |>
+  group_by(model) |>
+  slice_max(net_payoff, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+best_strategy_overall <- best_strategy_by_model |>
+  slice_max(net_payoff, n = 1, with_ties = FALSE)
+
+xgb_metric_row <- model_metrics_core |>
+  filter(model == "xgboost")
+
+logi_metric_row <- model_metrics_core |>
+  filter(model == "logi_full")
+
+xgb_best_strategy_row <- best_strategy_by_model |>
+  filter(model == "xgboost")
+
+logi_best_strategy_row <- best_strategy_by_model |>
+  filter(model == "logi_full")
+
+xgb_payoff_minus_logi <- xgb_best_strategy_row$net_payoff -
+  logi_best_strategy_row$net_payoff
+
+fmt_dollar <- function(x) {
+  paste0(ifelse(x < 0, "-$", "$"), fmt_int(abs(x)))
+}
+```
+
+### Table 2.19 {#result-table-2-19}
+
+```{r table-2-19}
+model_metrics_table <- model_metrics |>
+  mutate(
+    auc = fmt_num(auc, 4),
+    brier_score = fmt_num(brier_score, 4),
+    brier_skill = fmt_num(brier_skill, 4)
+  )
+
+companion_kable(
+  model_metrics_table,
+  caption = "Out-of-sample performance of the credit-scoring models.",
+  row.names = FALSE
+)
+```
+
+```{r step-060}
+roc_to_df <- function(roc_object, model_name) {
+  data.frame(
+    false_positive_rate = 1 - roc_object$specificities,
+    true_positive_rate = roc_object$sensitivities,
+    model = model_name,
+    auc = as.numeric(auc(roc_object))
+  )
+}
+
+roc_comparison <- bind_rows(
+  roc_to_df(ROC_logi_full, "Logistic regression"),
+  roc_to_df(ROC_tree_simple, "Single tree"),
+  roc_to_df(ROC_xgb, "XGBoost")
+) |>
+  mutate(
+    model_label = paste0(model, " (AUC = ", round(auc, 4), ")"),
+    model_label = factor(
+      model_label,
+      levels = unique(model_label)
+    )
+  ) |>
+  arrange(model_label, false_positive_rate)
+
+tree_roc_plot <- ggplot(
+  roc_comparison,
+  aes(
+    x = 1 - false_positive_rate,
+    y = true_positive_rate,
+    color = model_label, linetype = model_label
+  )
+) +
+  annotate("segment", x = 1, y = 0, xend = 0, yend = 1,
+    linetype = "dashed",
+    color = "gray60",
+    linewidth = 0.35
+  ) +
+  geom_line(linewidth = 0.8)
+```
+
+### Figure 2.9 {#result-figure-2-9}
+
+```{r figure-2-9}
+#| fig-width: 5.5
+#| fig-height: 5.1
+#| fig-cap: "Figure 2.9. ROC curves: logistic regression, single tree, and XGBoost."
+tree_roc_plot +
+  scale_color_manual(
+    values = unname(book_tree_colors),
+    name = NULL
+  ) +
+  scale_linetype_manual(values = c("solid", "dotted", "dashed"), name = NULL) +
+  guides(color = guide_legend(ncol = 1), linetype = guide_legend(ncol = 1)) +
+  scale_x_reverse(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(1, 0),
+    expand = c(0.01, 0.01)
+  ) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1),
+    expand = c(0.01, 0.01)
+  ) +
+  labs(
+    x = "Specificity",
+    y = "Sensitivity"
+  ) +
+  coord_equal() +
+  book_figure_theme() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Comparing calibration within each model's deciles
+
+### Table 2.20 {#result-table-2-20}
+
+```{r table-2-20}
+calibration_comparison |>
+  transmute(
+    Model = model,
+    Decile = risk_decile,
+    `Mean PD` = fmt_pct(average_predicted_pd, 2),
+    `Default rate` = fmt_pct(observed_default_rate, 2),
+    Brier = fmt_num(brier_score, 4)
+  ) |>
+  companion_kable(caption = "Probability checks within each model's own risk deciles.",
+               row.names = FALSE)
+calibration_logi_high <- subset(calibration_comparison,
+                                model == "logi_full" & risk_decile == 10)
+calibration_xgb_high <- subset(calibration_comparison,
+                               model == "xgboost" & risk_decile == 10)
+calibration_xgb_mid <- subset(calibration_comparison,
+                              model == "xgboost" & risk_decile == 7)
+```
+
+```{r step-063}
+tree_calibration_plot <- ggplot(calibration_comparison,
+       aes(x = average_predicted_pd, y = observed_default_rate,
+           color = model, linetype = model)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed",
+              color = "gray50", linewidth = 0.35) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.5)
+```
+
+### Figure 2.10 {#result-figure-2-10}
+
+```{r figure-2-10}
+#| fig-width: 5.5
+#| fig-height: 4.8
+#| fig-cap: "Figure 2.10. Calibration by decile: logistic regression and XGBoost."
+calibration_limit <- ceiling(max(calibration_comparison$average_predicted_pd,
+                                 calibration_comparison$observed_default_rate) * 10) / 10
+tree_calibration_plot +
+  scale_color_manual(values = book_tree_colors, labels = book_tree_labels) +
+  scale_linetype_manual(values = c(logi_full = "solid", xgboost = "dashed"),
+                        labels = book_tree_labels) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Average predicted probability of default",
+       y = "Observed default rate",
+       color = "Model", linetype = "Model") +
+  coord_equal(xlim = c(0, calibration_limit), ylim = c(0, calibration_limit)) +
+  book_figure_theme() +
+  theme(legend.position = "bottom")
+```
+
+### Comparing lending decisions and payoffs
+
+```{r step-065}
+tree_bad_rate_plot <- strategy_comparison |>
+  ggplot(aes(x = accept_rate, y = bad_rate, color = model, linetype = model)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2)
+```
+
+### Figure 2.11 {#result-figure-2-11}
+
+```{r figure-2-11}
+#| fig-width: 5.5
+#| fig-height: 4.3
+#| fig-cap: "Figure 2.11. Bad rate by acceptance rate: logistic regression, single tree, and XGBoost."
+tree_bad_rate_plot +
+  scale_color_manual(values = book_tree_colors, labels = book_tree_labels) +
+  scale_linetype_manual(values = c(logi_full = "solid", single_tree = "dotted", xgboost = "dashed"),
+                        labels = book_tree_labels) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Target acceptance rate", y = "Bad rate", color = "Model", linetype = "Model") +
+  book_figure_theme() +
+  theme(legend.position = "bottom")
+```
+
+```{r step-067}
+best_strategy_points <- strategy_comparison |>
+  group_by(model) |>
+  slice_max(net_payoff, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+tree_payoff_plot <- strategy_comparison |>
+  ggplot(aes(x = accept_rate, y = net_payoff, color = model, linetype = model)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2)
+```
+
+### Figure 2.12 {#result-figure-2-12}
+
+```{r figure-2-12}
+#| fig-width: 5.5
+#| fig-height: 4.3
+#| fig-cap: "Figure 2.12. Net payoff by acceptance rate: logistic regression, single tree, and XGBoost."
+tree_payoff_plot +
+  geom_segment(
+    data = best_strategy_points,
+    aes(
+      x = accept_rate,
+      xend = accept_rate,
+      y = 4000,
+      yend = net_payoff,
+      color = model
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.35
+  ) +
+  geom_segment(
+    data = best_strategy_points,
+    aes(
+      x = min(strategy_comparison$accept_rate),
+      xend = accept_rate,
+      y = net_payoff,
+      yend = net_payoff,
+      color = model
+    ),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    linewidth = 0.35
+  ) +
+  geom_point(
+    data = best_strategy_points,
+    aes(x = accept_rate, y = net_payoff, color = model),
+    inherit.aes = FALSE,
+    shape = 21,
+    fill = "white",
+    size = 3,
+    stroke = 0.8
+  ) +
+  scale_color_manual(values = book_tree_colors, labels = book_tree_labels) +
+  scale_linetype_manual(values = c(logi_full = "solid", single_tree = "dotted", xgboost = "dashed"),
+                        labels = book_tree_labels) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_y_continuous(labels = scales::label_dollar(accuracy = 1)) +
+  coord_cartesian(ylim = c(4000, NA)) +
+  labs(x = "Target acceptance rate", y = "Net payoff", color = "Model", linetype = "Model") +
+  book_figure_theme() +
+  theme(legend.position = "bottom")
+```
+
+### Table 2.21 {#result-table-2-21}
+
+```{r table-2-21}
+best_strategy_overall_check <- data.frame(
+  Quantity = c(
+    "Model",
+    "Acceptance rate",
+    "Accepted good loans",
+    "Payoff from good loans ($1 each)",
+    "Accepted default loans",
+    "Cost from default loans ($5 each)",
+    "Net payoff"
+  ),
+  Value = c(
+    best_strategy_overall$model,
+    fmt_pct(best_strategy_overall$accept_rate, 0),
+    fmt_int(best_strategy_overall$accepted_good),
+    fmt_dollar(best_strategy_overall$accepted_good * 1),
+    fmt_int(best_strategy_overall$accepted_defaults),
+    fmt_dollar(-best_strategy_overall$accepted_defaults * 5),
+    fmt_dollar(best_strategy_overall$net_payoff)
+  )
+)
+
+companion_kable(
+  best_strategy_overall_check,
+  caption = "Numerical check of the overall best net-payoff strategy.",
+  row.names = FALSE
+)
+```
+
+### Table 2.22 {#result-table-2-22}
+
+```{r table-2-22}
+best_strategy_by_model_table <- strategy_comparison |>
+  group_by(model) |>
+  slice_max(net_payoff, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(model, accept_rate, actual_accept_rate, cutoff, bad_rate, net_payoff) |>
+  mutate(
+    accept_rate = fmt_pct(accept_rate, 0),
+    actual_accept_rate = fmt_pct(actual_accept_rate, 2),
+    cutoff = fmt_pct(cutoff, 2),
+    bad_rate = fmt_pct(bad_rate, 2),
+    net_payoff = fmt_dollar(net_payoff)
+  )
+
+companion_kable(
+  best_strategy_by_model_table,
+  caption = "Best net-payoff row by model.",
+  col.names = c("Model", "Target", "Accepted", "PD cutoff", "Bad rate", "Net payoff"),
+  row.names = FALSE
+)
+```
+
+## 2.8 What do we gain and what do we lose?
+
+### Table 2.23 {#result-table-2-23}
+
+```{r table-2-23}
+tree_governance_checklist <- data.frame(
+  Check = c(
+    "Ranking",
+    "Probability quality",
+    "Cutoff decision",
+    "Economic consequence",
+    "Interpretability",
+    "Model governance"
+  ),
+  `Evidence used in this chapter` = c(
+    "ROC curve and AUC",
+    "Brier score and calibration by decile",
+    "Bad rate by acceptance rate",
+    "Net payoff under an explicit cost rule",
+    "Tree leaves, feature importance, SHAP-style contributions, and partial dependence",
+    "Training/test comparison and stated need for validation or cross-validation"
+  ),
+  `Production extension` = c(
+    "Validate ranking on a holdout sample and across time.",
+    "Recalibrate probabilities when the ranking is useful but PD levels are biased.",
+    "Choose cutoffs with business, risk-appetite, and compliance constraints.",
+    "Replace the simplified payoff with loan-level profitability, LGD, EAD, and funding costs.",
+    "Document drivers, adverse-action logic, stability, and fairness implications.",
+    "Use cross-validation, monitoring, challenger models, and periodic recalibration."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  tree_governance_checklist,
+  caption = "Governance checklist for moving from a tree-based score to a credit policy.",
+  row.names = FALSE
+)
+```
+
+### Keeping a record of the approved model and policy
+
+### Following repayment outcomes after deployment
+
+## Session and numeric results
+
+```{r companion-results}
+companion_finish(knitr::knit_global())
+```

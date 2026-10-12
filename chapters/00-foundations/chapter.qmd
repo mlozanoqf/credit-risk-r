@@ -1,0 +1,290 @@
+---
+title: "Foundations for Applied Credit Risk"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+execute:
+  echo: true
+  cache: false
+  error: false
+  warning: false
+  message: false
+---
+
+Computational companion. Run from the project root in source order. Each result
+uses the preceding calculations in this chapter. Book numbering follows the
+11 October 2026 review version. The chapter README contains the result index.
+
+```{r companion-setup}
+source("shared/output.R")
+companion_setup("00-foundations")
+```
+
+## Credit risk within risk management
+
+## Reading a credit record and its notation
+
+```{r step-001}
+source("shared/formatting.R")
+source("shared/figure-theme.R")
+library(ggplot2)
+```
+
+```{r step-002}
+records <- data.frame(
+  loan_id = c(101, 102, 103, 104),
+  exposure = c(1000, 2000, 1500, 3000),
+  default = c(0, 1, 0, 0)
+)
+```
+
+```{r step-003}
+companion_kable(records, col.names = c("Loan ID", "Exposure ($)", "Default within one year"))
+```
+
+```{r step-004}
+records$exposure
+records[2, "exposure"]
+records[2, ]
+```
+
+```{r step-005}
+total_exposure <- sum(records$exposure)
+observed_defaults <- sum(records$default)
+number_of_loans <- nrow(records)
+mean_exposure <- mean(records$exposure)
+c(total_exposure = total_exposure,
+  defaults = observed_defaults, mean_exposure = mean_exposure)
+```
+
+## Frequencies, probabilities, and the population at risk
+
+### Keeping percentages and changes on the right scale
+
+```{r step-006}
+p_before <- 0.08
+p_after <- 0.10
+change_pp <- 100 * (p_after - p_before)
+relative_change <- (p_after - p_before) / p_before
+change_bps <- 10000 * (p_after - p_before)
+c(percentage_points = change_pp,
+  relative_change_percent = 100 * relative_change,
+  basis_points = change_bps)
+```
+
+### Changing the denominator changes the question
+
+```{r step-007}
+segment_size <- c(A = 50, B = 50)
+segment_defaults <- c(A = 2, B = 6)
+segment_pd <- segment_defaults / segment_size
+segment_weight <- segment_size / sum(segment_size)
+overall_pd <- sum(segment_weight * segment_pd)
+overall_pd
+```
+
+```{r step-008}
+year1_pd <- 8 / 100
+year2_conditional_pd <- 5 / 92
+survival_two_years <- (1 - year1_pd) * (1 - year2_conditional_pd)
+cumulative_two_year_pd <- 1 - survival_two_years
+c(year2_conditional_pd = year2_conditional_pd,
+  cumulative_two_year_pd = cumulative_two_year_pd)
+```
+
+## Expected outcomes and dollar losses
+
+```{r step-009}
+pd <- 0.08
+ead <- 10000
+recovery <- 0.40
+lgd <- 1 - recovery
+loss_in_default <- ead * lgd
+expected_loss <- pd * loss_in_default
+c(loss_in_default = loss_in_default, expected_loss = expected_loss)
+```
+
+### Aggregating heterogeneous loans
+
+```{r step-010}
+loan_pd <- c(0.02, 0.06, 0.10)
+loan_ead <- c(1000, 2000, 5000)
+loan_lgd <- c(0.40, 0.40, 0.40)
+loan_el <- loan_pd * loan_lgd * loan_ead
+portfolio_el <- sum(loan_el)
+loan_el
+portfolio_el
+```
+
+```{r step-011}
+exposure_weight <- loan_ead / sum(loan_ead)
+weighted_pd <- sum(exposure_weight * loan_pd)
+portfolio_el_check <- weighted_pd * 0.40 * sum(loan_ead)
+c(weighted_pd = weighted_pd, expected_loss = portfolio_el_check)
+```
+
+## Distributions, dependence, and adverse outcomes
+
+```{r step-012}
+loss_values <- c(0, 5000, 10000)
+prob_independent <- c(0.81, 0.18, 0.01)
+prob_together <- c(0.90, 0, 0.10)
+loss_distribution <- data.frame(
+  loss = rep(loss_values, 2),
+  probability = c(prob_independent, prob_together),
+  dependence = rep(c("Independent", "Always together"), each = 3)
+)
+```
+
+```{r step-013}
+companion_kable(data.frame(
+  "Portfolio loss ($)" = loss_values,
+  "Independent" = fmt_pct(prob_independent, 0),
+  "Always together" = fmt_pct(prob_together, 0),
+  check.names = FALSE
+))
+```
+
+```{r step-014}
+loss_plot <- ggplot(loss_distribution,
+  aes(x = factor(loss), y = probability)) +
+  geom_col(width = 0.6, fill = "#0072B2") + facet_wrap(~ dependence)
+```
+
+```{r step-015}
+#| fig-width: 5.5
+#| fig-height: 3.2
+loss_plot +
+  geom_text(aes(label = scales::percent(probability, accuracy = 1)),
+    vjust = -0.5, size = 3.3) +
+  scale_y_continuous(labels = scales::label_percent(), limits = c(0, 1),
+    expand = expansion(mult = c(0, 0.03))) +
+  scale_x_discrete(labels = c("$0", "$5,000", "$10,000")) +
+  labs(x = "Portfolio loss", y = "Probability") + book_figure_theme()
+```
+
+```{r step-016}
+mean_independent <- sum(loss_values * prob_independent)
+mean_together <- sum(loss_values * prob_together)
+sd_independent <- sqrt(sum(prob_independent *
+  (loss_values - mean_independent)^2))
+sd_together <- sqrt(sum(prob_together *
+  (loss_values - mean_together)^2))
+round(c(mean_independent = mean_independent,
+  mean_together = mean_together,
+  sd_independent = sd_independent, sd_together = sd_together), 2)
+```
+
+### Reading a cumulative probability and a quantile
+
+```{r step-017}
+cdf_independent <- cumsum(prob_independent)
+cdf_together <- cumsum(prob_together)
+q95_independent <- loss_values[which(cdf_independent >= 0.95)[1]]
+q95_together <- loss_values[which(cdf_together >= 0.95)[1]]
+c(q95_independent = q95_independent, q95_together = q95_together)
+```
+
+## Standardized scores, logarithms, and probabilities
+
+```{r step-018}
+normal_pd <- 0.08
+normal_threshold <- qnorm(normal_pd)
+normal_check <- pnorm(normal_threshold)
+central_probability <- pnorm(1) - pnorm(-1)
+c(threshold = normal_threshold, recovered_pd = normal_check,
+  probability_between_minus1_and_1 = central_probability)
+```
+
+```{r step-019}
+normal_grid <- data.frame(z = seq(-3.5, 3.5, length.out = 701))
+normal_grid$density <- dnorm(normal_grid$z)
+normal_plot <- ggplot(normal_grid, aes(z, density)) + geom_line()
+```
+
+```{r step-020}
+#| fig-width: 5.5
+#| fig-height: 3.3
+normal_tail <- data.frame(z = seq(-3.5, normal_threshold, length.out = 300))
+normal_tail$density <- dnorm(normal_tail$z)
+normal_plot +
+  geom_area(data = normal_tail, fill = "#B22222", alpha = 0.65) +
+  geom_line(linewidth = 0.8, color = "#0072B2") +
+  geom_vline(xintercept = normal_threshold, linetype = "dotted",
+    linewidth = 0.35, color = "#B22222") +
+  annotate("text", x = -2.2, y = 0.25,
+    label = "Left-tail probability\n8%", size = 3.2) +
+  scale_y_continuous(limits = c(0, 0.44), expand = expansion(mult = c(0, 0))) +
+  labs(x = "Standardized score", y = "Density") + book_figure_theme()
+```
+
+### Moving between a probability and a model score
+
+```{r step-021}
+probability <- 0.08
+odds <- probability / (1 - probability)
+score <- log(odds)
+probability_check <- 1 / (1 + exp(-score))
+c(odds = odds, score = score, recovered_pd = probability_check)
+```
+
+## Time, interest, and present value
+
+```{r step-022}
+annual_rate <- 0.05
+initial_amount <- 1000
+years <- 2
+future_amount <- initial_amount * (1 + annual_rate)^years
+present_value_check <- future_amount / (1 + annual_rate)^years
+c(future_amount = future_amount, present_value = present_value_check)
+```
+
+```{r step-023}
+payment_time <- c(1, 2)
+cash_flow <- c(50, 1050)
+discount_factor <- (1 + annual_rate)^(-payment_time)
+payment_pv <- cash_flow * discount_factor
+sum(payment_pv)
+```
+
+### Recognizing an equivalent exponential convention
+
+```{r step-024}
+continuous_rate <- log(1 + annual_rate)
+discount_discrete <- (1 + annual_rate)^(-years)
+discount_exponential <- exp(-continuous_rate * years)
+c(continuous_rate = continuous_rate,
+  discrete_factor = discount_discrete,
+  exponential_factor = discount_exponential)
+```
+
+## Sampling uncertainty, assumptions, and scenarios
+
+```{r step-025}
+estimated_pd <- 0.08
+sample_sizes <- c(100, 10000)
+standard_errors <- sqrt(estimated_pd * (1 - estimated_pd) / sample_sizes)
+100 * standard_errors
+```
+
+### Reading a result conditional on a scenario
+
+```{r step-026}
+scenario_pd <- c(Baseline = 0.08, Stress = 0.12)
+scenario_el <- scenario_pd * 10000 * 0.60
+scenario_el
+unname(scenario_el["Stress"] - scenario_el["Baseline"])
+```
+
+### From foundations to lending decisions
+
+## Session and numeric results
+
+```{r companion-results}
+companion_finish(knitr::knit_global())
+```

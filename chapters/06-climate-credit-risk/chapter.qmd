@@ -1,0 +1,1158 @@
+---
+title: "Climate Credit Risk"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+execute:
+  echo: true
+  cache: false
+  error: false
+  warning: false
+  message: false
+---
+
+Computational companion. Run from the project root in source order. Each result
+uses the preceding calculations in this chapter. Book numbering follows the
+11 October 2026 review version. The chapter README contains the result index.
+
+```{r companion-setup}
+source("shared/output.R")
+companion_setup("06-climate-credit-risk")
+```
+
+## 6.1 How climate shocks reach credit risk
+
+### Transition risk through coal and electricity supply
+
+### Physical risk through assets and interrupted operations
+
+### From repayment capacity to portfolio risk
+
+```{r step-001}
+source("shared/figure-theme.R")
+```
+
+```{r step-002}
+knitr::opts_chunk$set(fig.width = 5.5, fig.height = 4)
+```
+
+```{r step-003}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(knitr)
+  library(scales)
+  library(tidyr)
+})
+
+source("shared/formatting.R")
+source("shared/expected-shortfall.R")
+
+theme_set(book_figure_theme())
+```
+
+```{r step-004}
+fmt_pp <- function(x, digits = 2) {
+  paste0(fmt_num(x, digits), " pp")
+}
+
+fmt_usd_m <- function(x, digits = 2) {
+  paste0("$", fmt_num(x / 1e6, digits), "m")
+}
+
+fmt_bps_label <- function(x, digits = 0) {
+  paste0(fmt_num(x, digits), " bps")
+}
+
+book_palette <- c(
+  "Baseline" = "#666666",
+  "Diverging Realities" = "#0072B2",
+  "Highway to Paris" = "#B22222",
+  "Sudden Wake-up Call" = "#009E73",
+  "Physical stress" = "#7A5195"
+)
+```
+
+## 6.2 From climate scenarios to credit quantities
+
+### What the scenario names mean
+
+### Table 6.1 {#result-table-6-1}
+
+```{r table-6-1}
+scenario_table <- data.frame(
+  `Scenario code` = c("DIRE", "HWTP", "SWUC"),
+  `NGFS scenario narrative` = c(
+    "Diverging Realities",
+    "Highway to Paris",
+    "Sudden Wake-up Call"
+  ),
+  `API run ID` = c(74, 75, 76),
+  `Main credit-risk channel` = c(
+    "Mixed transition and physical pressure",
+    "Orderly but demanding transition pressure",
+    "Delayed transition shock"
+  ),
+  `Reading in this chapter` = c(
+    "Climate policy and climate damage are uneven across regions and sectors.",
+    "The transition is more coordinated, but high-emission sectors still face credit stress.",
+    "The market reprices climate risk abruptly after a period of limited adjustment."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  scenario_table,
+  row.names = FALSE,
+  caption = "Global NGFS short-term CLIMACRED scenarios used in the main analysis."
+)
+```
+
+### Table 6.2 {#result-table-6-2}
+
+```{r table-6-2}
+climate_channel_map <- data.frame(
+  Channel = c(
+    "Transition risk",
+    "Physical risk"
+  ),
+  `Typical credit mechanism` = c(
+    "Policy, technology, energy prices, demand, and cost-of-capital changes affect sector cash flows and refinancing capacity.",
+    "Flood, heat, drought, storm, wildfire, and chronic climate stress affect assets, operations, collateral, insurance costs, and supply chains."
+  ),
+  `How this chapter uses it` = c(
+    "The main portfolio workflow uses global CLIMACRED scenario adjustments by sector.",
+    "The DAPS block is a regional diagnostic that shows why a full physical-risk credit model needs location."
+  ),
+  `Data needed for a production model` = c(
+    "Borrower sector, exposure, maturity, recovery, baseline credit quality, and scenario mapping.",
+    "Borrower and collateral geography, hazard intensity, vulnerability, insurance, business interruption, and supply-chain exposure."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  climate_channel_map,
+  caption = "How transition and physical climate risk enter credit analysis in this chapter.",
+  row.names = FALSE
+)
+```
+
+### What CLIMACRED supplies and what we calculate
+
+### Credit variables and units
+
+### Table 6.3 {#result-table-6-3}
+
+```{r table-6-3}
+ngfs_variable_table <- data.frame(
+  variable = c(
+    "`baseline_pd`",
+    "`pd_adjustment`",
+    "`corporate_bond_spread_adjustment`",
+    "`corporate_bond_price_rel_adjustment`",
+    "`wacc_adjustment`"
+  ),
+  unit = c(
+    "Percentage points",
+    "Percentage points relative to BAU",
+    "Percentage points relative to BAU",
+    "Percent relative to BAU",
+    "Percentage points relative to BAU"
+  ),
+  role = c(
+    "Default risk before the climate adjustment.",
+    "Climate-related change in sector PD.",
+    "Credit-spread change implied by the scenario.",
+    "Corporate bond price change implied by the scenario.",
+    "Cost-of-capital change implied by the scenario."
+  )
+)
+
+companion_kable(
+  ngfs_variable_table,
+  caption = "CLIMACRED variables used in the chapter."
+)
+```
+
+## 6.3 Downloading and preparing climate credit data
+
+```{r step-008}
+#| eval: false
+ngfs_database <- "IXSE_NGFS_PHASE_5_SHORT_TERM"
+ngfs_auth_url <- "https://api.manager.ece.iiasa.ac.at/legacy"
+ngfs_base_url <- "https://db1.ene.iiasa.ac.at/ngfs-phase-5-short-term-api/rest/v2.1"
+
+ngfs_get_guest_token <- function(max_tries = 5, wait_seconds = 1) {
+  token_url <- paste0(ngfs_auth_url, "/anonym/", ngfs_database)
+
+  for (try_id in seq_len(max_tries)) {
+    response <- try(
+      httr::GET(
+        token_url,
+        query = list(algorithm = "HS256"),
+        httr::timeout(30)
+      ),
+      silent = TRUE
+    )
+
+    if (!inherits(response, "try-error") &&
+        httr::status_code(response) == 200) {
+      token <- httr::content(response, as = "text", encoding = "UTF-8")
+      token <- gsub('^"|"$', "", token)
+
+      if (nzchar(token)) {
+        return(token)
+      }
+    }
+
+    Sys.sleep(wait_seconds)
+  }
+
+  stop("The NGFS guest token could not be obtained. Check the internet connection or the NGFS/IIASA service.")
+}
+
+ngfs_post_timeseries <- function(runs, regions, variables, years = integer()) {
+  token <- ngfs_get_guest_token()
+
+  request_body <- list(
+    filters = list(
+      runs = as.list(as.integer(runs)),
+      regions = as.list(regions),
+      variables = as.list(variables),
+      units = list(),
+      years = as.list(as.integer(years)),
+      timeslices = list("Year")
+    )
+  )
+
+  response <- httr::POST(
+    paste0(ngfs_base_url, "/runs/bulk/ts"),
+    httr::add_headers(Authorization = paste("Bearer", token)),
+    httr::content_type_json(),
+    body = jsonlite::toJSON(request_body, auto_unbox = TRUE),
+    encode = "raw",
+    httr::timeout(120)
+  )
+
+  response_text <- httr::content(response, as = "text", encoding = "UTF-8")
+
+  if (httr::status_code(response) != 200) {
+    stop(response_text)
+  }
+
+  data <- jsonlite::fromJSON(response_text, flatten = TRUE)
+
+  if (length(data) == 0) {
+    stop("The NGFS query returned no observations. Check run names, regions, variables, or years.")
+  }
+
+  tibble::as_tibble(data)
+}
+```
+
+```{r step-009}
+#| eval: false
+source("chapters/06-climate-credit-risk/helpers/download-data.R")
+```
+
+### Portfolio inputs and source files
+
+```{r step-010}
+global_runs <- c(
+  "Diverging Realities" = 74,
+  "Highway to Paris" = 75,
+  "Sudden Wake-up Call" = 76
+)
+
+portfolio <- tibble::tibble(
+  portfolio_sector = c(
+    "Coal",
+    "Oil",
+    "Gas",
+    "Power",
+    "Land transport",
+    "Air transport",
+    "Construction",
+    "Agriculture",
+    "Chemicals",
+    "Technology hardware"
+  ),
+  ngfs_sector = c(
+    "Coal",
+    "Oil",
+    "Gas",
+    "Power Supply",
+    "Land transport",
+    "Air transport",
+    "Construction",
+    "Agriculture",
+    "Chemical Products",
+    "Computer, electronic and optical products"
+  ),
+  ead = c(10, 12, 10, 12, 10, 8, 10, 8, 10, 10) * 1e6,
+  recovery = c(0.35, 0.40, 0.42, 0.45, 0.40, 0.35, 0.45, 0.35, 0.42, 0.50)
+)
+
+metric_names <- c(
+  "baseline_pd",
+  "pd_adjustment",
+  "corporate_bond_spread_adjustment",
+  "corporate_bond_price_rel_adjustment",
+  "wacc_adjustment"
+)
+
+ngfs_variables <- as.vector(
+  outer(metric_names, portfolio$ngfs_sector, paste, sep = "|")
+)
+
+horizon_years <- 2026:2030
+```
+
+```{r step-011}
+portfolio_table <- portfolio |>
+  mutate(
+    EAD = fmt_usd_m(ead),
+    Recovery = fmt_pct(recovery, 1),
+    LGD = fmt_pct(1 - recovery, 1)
+  ) |>
+  transmute(
+    `Portfolio sector` = portfolio_sector,
+    `NGFS sector` = ngfs_sector,
+    EAD,
+    Recovery,
+    LGD
+  )
+```
+
+### Table 6.4 {#result-table-6-4}
+
+```{r table-6-4}
+companion_kable(
+  portfolio_table,
+  caption = "Sector portfolio used for the climate credit-risk application."
+)
+```
+
+```{r step-013}
+ngfs_manifest <- utils::read.csv(
+  file.path("data", "climate", "ngfs_climacred_download_manifest.csv"),
+  stringsAsFactors = FALSE
+)
+
+ngfs_raw <- utils::read.csv(
+  file.path("data", "climate", "ngfs_climacred_global_raw.csv"),
+  stringsAsFactors = FALSE
+)
+```
+
+### Table 6.5 {#result-table-6-5}
+
+```{r table-6-5}
+ngfs_manifest |>
+  transmute(
+    File = file,
+    Rows = rows,
+    Database = database,
+    `Downloaded at UTC` = downloaded_at_utc
+  ) |>
+  companion_kable(caption = "Raw NGFS/IIASA files used in the chapter.")
+```
+
+### Table 6.6 {#result-table-6-6}
+
+```{r table-6-6}
+ngfs_raw |>
+  select(model, scenario, region, variable, year, value) |>
+  head(8) |>
+  companion_kable(caption = "First rows of the raw global CLIMACRED file.")
+```
+
+### Table 6.7 {#result-table-6-7}
+
+```{r table-6-7}
+climate_data_provenance <- data.frame(
+  Layer = c(
+    "External scenario source",
+    "Download script",
+    "Frozen raw files",
+    "Portfolio assumptions",
+    "Clean analysis table"
+  ),
+  Object = c(
+    "NGFS Short-term Scenario Explorer / IIASA API",
+    "`chapters/06-climate-credit-risk/helpers/download-data.R`",
+    "`data/climate/ngfs_climacred_global_raw.csv` and `data/climate/ngfs_climacred_daps_raw.csv`",
+    "`portfolio`",
+    "`climate_credit`"
+  ),
+  Role = c(
+    "Supplies sector-level climate-credit variables by scenario, region, year, and metric.",
+    "Documents the API request and refreshes the raw CSV files when the data source is available.",
+    "Keep the book render reproducible and preserve the original scenario code, variable string, unit, year, and value.",
+    "Specifies the portfolio's EAD and recovery assumptions by sector.",
+    "Joins scenario data to portfolio assumptions and converts percentage-point variables into decimal credit quantities."
+  )
+)
+
+companion_kable(
+  climate_data_provenance,
+  caption = "Data provenance for the climate credit-risk workflow.",
+  escape = FALSE
+)
+```
+
+### Reshaping the raw data for credit calculations
+
+```{r step-017}
+scenario_lookup <- tibble::tibble(
+  scenario = c("DIRE", "HWTP", "SWUC"),
+  scenario_label = c(
+    "Diverging Realities",
+    "Highway to Paris",
+    "Sudden Wake-up Call"
+  )
+)
+
+climate_credit <- ngfs_raw |>
+  tidyr::separate(
+    variable,
+    into = c("metric", "ngfs_sector"),
+    sep = "\\|",
+    extra = "merge",
+    remove = FALSE
+  ) |>
+  inner_join(portfolio, by = "ngfs_sector") |>
+  inner_join(scenario_lookup, by = "scenario") |>
+  select(
+    scenario,
+    scenario_label,
+    year,
+    portfolio_sector,
+    ngfs_sector,
+    ead,
+    recovery,
+    metric,
+    value
+  ) |>
+  tidyr::pivot_wider(
+    names_from = metric,
+    values_from = value
+  ) |>
+  mutate(
+    baseline_pd = baseline_pd / 100,
+    pd_adjustment = pd_adjustment / 100,
+    climate_pd = pmin(baseline_pd + pd_adjustment, 1),
+    corporate_bond_spread_adjustment =
+      corporate_bond_spread_adjustment / 100,
+    corporate_bond_price_rel_adjustment =
+      corporate_bond_price_rel_adjustment / 100,
+    wacc_adjustment = wacc_adjustment / 100,
+    lgd = 1 - recovery
+  )
+```
+
+### Table 6.8 {#result-table-6-8}
+
+```{r table-6-8}
+climate_credit |>
+  filter(year == 2030, scenario == "HWTP") |>
+  transmute(
+    `Portfolio sector` = portfolio_sector,
+    `Baseline PD` = fmt_pct(baseline_pd, 2),
+    `Climate PD adjustment` = fmt_pp(100 * pd_adjustment, 2),
+    `Climate PD` = fmt_pct(climate_pd, 2),
+    `Spread adjustment` =
+      fmt_bps_label(corporate_bond_spread_adjustment * 10000, 0)
+  ) |>
+companion_kable(
+    caption = "Cleaned CLIMACRED credit variables for Highway to Paris in 2030."
+  )
+```
+
+```{r step-019}
+coal_hwtp_2030 <- climate_credit |>
+  filter(
+    scenario == "HWTP",
+    year == 2030,
+    portfolio_sector == "Coal"
+  ) |>
+  slice(1)
+```
+
+## 6.4 Physical risk is local
+
+```{r step-020}
+daps_runs <- c(
+  DAPS_AFR_R = 68,
+  DAPS_ASIA = 69,
+  DAPS_EUR = 70,
+  DAPS_NAM = 71,
+  DAPS_OCE = 72,
+  DAPS_SAM = 73
+)
+
+daps_regions <- c(
+  "Africa",
+  "Asia",
+  "Euro Area",
+  "North America",
+  "Oceania",
+  "South America"
+)
+
+daps_region_map <- tibble::tibble(
+  scenario = names(daps_runs),
+  region = daps_regions
+)
+
+daps_variables <- as.vector(
+  outer(
+    "pd_adjustment",
+    c("Agriculture", "Coal", "Power Supply"),
+    paste,
+    sep = "|"
+  )
+)
+
+daps_raw <- utils::read.csv(
+  file.path("data", "climate", "ngfs_climacred_daps_raw.csv"),
+  stringsAsFactors = FALSE
+)
+
+daps_pd <- daps_raw |>
+  tidyr::separate(
+    variable,
+    into = c("metric", "ngfs_sector"),
+    sep = "\\|",
+    remove = FALSE
+  ) |>
+  inner_join(daps_region_map, by = c("scenario", "region")) |>
+  mutate(
+    pd_adjustment = value / 100,
+    region_label = case_when(
+      scenario == "DAPS_AFR_R" ~ "Africa",
+      scenario == "DAPS_ASIA" ~ "Asia",
+      scenario == "DAPS_EUR" ~ "Euro Area",
+      scenario == "DAPS_NAM" ~ "North America",
+      scenario == "DAPS_OCE" ~ "Oceania",
+      scenario == "DAPS_SAM" ~ "South America",
+      TRUE ~ region
+    )
+  )
+
+daps_summary <- daps_pd |>
+  group_by(region_label, ngfs_sector) |>
+  summarise(
+    max_pd_adjustment = max(pd_adjustment, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+plot_fig_climate_physical_risk_local <- ggplot(daps_summary, aes(x = max_pd_adjustment * 100, y = reorder(region_label, max_pd_adjustment),
+    fill = ngfs_sector)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65)
+```
+
+### Figure 6.1 {#result-figure-6-1}
+
+```{r figure-6-1}
+#| fig-width: 5.5
+#| fig-height: 5.4
+#| fig-cap: "Figure 6.1. Regional physical-risk PD adjustments in selected CLIMACRED DAPS runs."
+plot_fig_climate_physical_risk_local +
+  scale_fill_manual(values = c(Agriculture = "#009E73", Coal = "#B22222", `Power Supply` = "#0072B2")) +
+  labs(x = "Maximum PD adjustment during 2024-2030 (percentage points)", y = NULL, fill = NULL,
+    caption = "Source: NGFS Short-term Scenario Explorer, CLIMACRED.") +
+  theme(legend.position = "bottom", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid.major.y = element_blank())
+```
+
+### Reading a regional physical shock
+
+```{r step-022}
+physical_agriculture <- daps_pd |>
+  filter(ngfs_sector == "Agriculture")
+physical_peak <- physical_agriculture |>
+  arrange(desc(pd_adjustment), region_label, year) |>
+  slice(1)
+physical_comparison <- physical_agriculture |>
+  filter(region_label == "Asia", year == physical_peak$year)
+physical_gap_pp <- 100 * (
+  physical_peak$pd_adjustment - physical_comparison$pd_adjustment
+)
+```
+
+### Table 6.9 {#result-table-6-9}
+
+```{r table-6-9}
+physical_risk_data_requirements <- data.frame(
+  Required_input = c(
+    "Borrower geography",
+    "Asset and collateral location",
+    "Hazard intensity",
+    "Vulnerability or damage function",
+    "Insurance and recovery assumptions",
+    "Business-interruption channel",
+    "Credit translation",
+    "Portfolio aggregation"
+  ),
+  `Why it matters for credit risk` = c(
+    "The same sector can face different physical shocks in different regions.",
+    "A borrower may be global, while the financed asset or collateral is local.",
+    "Flood depth, heat stress, drought severity, or storm exposure determines the shock size.",
+    "The hazard must be converted into damage, cost, lost revenue, or collateral impairment.",
+    "Insurance and recovery affect LGD as well as borrower liquidity.",
+    "Physical events can reduce revenue even when assets are not destroyed.",
+    "The model needs a rule that maps physical damage into PD, LGD, spread, or rating migration.",
+    "The final output must combine sector, geography, exposure, recovery, and dependence."
+  ),
+  check.names = FALSE
+)
+
+companion_kable(
+  physical_risk_data_requirements,
+  caption = "Inputs needed to turn physical climate risk into a full credit-risk model.",
+  row.names = FALSE
+)
+```
+
+## 6.5 Expected loss with climate-adjusted PDs
+
+```{r step-024}
+pv_expected_loss <- function(pd_vector, ead, recovery, discount_rate) {
+  h <- pmin(pmax(pd_vector, 0), 1)
+  survival_start <- c(1, cumprod(1 - h)[-length(h)])
+  marginal_pd <- survival_start * h
+  discount <- 1 / (1 + discount_rate)^seq_along(h)
+
+  sum(ead * (1 - recovery) * marginal_pd * discount)
+}
+
+risk_free_rate <- 0.04
+
+horizon_loss <- climate_credit |>
+  filter(year %in% horizon_years) |>
+  arrange(scenario, portfolio_sector, year) |>
+  group_by(
+    scenario,
+    scenario_label,
+    portfolio_sector,
+    ngfs_sector,
+    ead,
+    recovery
+  ) |>
+  summarise(
+    pv_el_baseline = pv_expected_loss(
+      baseline_pd,
+      first(ead),
+      first(recovery),
+      risk_free_rate
+    ),
+    pv_el_climate = pv_expected_loss(
+      climate_pd,
+      first(ead),
+      first(recovery),
+      risk_free_rate
+    ),
+    incremental_pv_el = pv_el_climate - pv_el_baseline,
+    .groups = "drop"
+  )
+
+portfolio_horizon_loss <- horizon_loss |>
+  group_by(scenario_label) |>
+  summarise(
+    baseline_pv_el = sum(pv_el_baseline),
+    climate_pv_el = sum(pv_el_climate),
+    incremental_pv_el = sum(incremental_pv_el),
+    increase = climate_pv_el / baseline_pv_el - 1,
+    .groups = "drop"
+  )
+
+largest_scenario_increase <- portfolio_horizon_loss |>
+  arrange(desc(incremental_pv_el)) |>
+  slice(1)
+
+top_sector_increase <- horizon_loss |>
+  arrange(desc(incremental_pv_el)) |>
+  slice(1)
+
+coal_hwtp_path <- climate_credit |>
+  filter(
+    scenario == "HWTP",
+    portfolio_sector == "Coal",
+    year %in% horizon_years
+  ) |>
+  arrange(year)
+
+coal_hwtp_survival_start <- c(
+  1,
+  cumprod(1 - coal_hwtp_path$climate_pd)[-length(coal_hwtp_path$climate_pd)]
+)
+
+coal_hwtp_marginal_pd <- coal_hwtp_survival_start * coal_hwtp_path$climate_pd
+
+coal_hwtp_discount <- 1 / (1 + risk_free_rate)^seq_along(coal_hwtp_path$year)
+
+coal_hwtp_lgd <- 1 - coal_hwtp_path$recovery
+
+coal_hwtp_pv_el <- coal_hwtp_path$ead *
+  coal_hwtp_lgd *
+  coal_hwtp_marginal_pd *
+  coal_hwtp_discount
+```
+
+```{r step-025}
+coal_hwtp_el_steps <- data.frame(
+  Year = coal_hwtp_path$year,
+  `Climate PD` = fmt_pct(coal_hwtp_path$climate_pd, 2),
+  `Survival at start` = fmt_pct(coal_hwtp_survival_start, 2),
+  `Marginal PD` = fmt_pct(coal_hwtp_marginal_pd, 2),
+  EAD = fmt_usd_m(coal_hwtp_path$ead),
+  LGD = fmt_pct(coal_hwtp_lgd, 1),
+  `Discount factor` = fmt_num(coal_hwtp_discount, 4),
+  `PV expected loss` = fmt_usd_m(coal_hwtp_pv_el)
+)
+```
+
+### Table 6.10 {#result-table-6-10}
+
+```{r table-6-10}
+portfolio_horizon_loss |>
+  transmute(
+    Scenario = scenario_label,
+    `Baseline PV expected loss` = fmt_usd_m(baseline_pv_el),
+    `Climate-adjusted PV expected loss` = fmt_usd_m(climate_pv_el),
+    `Change in PV expected loss` = fmt_usd_m(incremental_pv_el),
+    `Relative change` = fmt_pct(increase, 1)
+  ) |>
+  companion_kable(
+    caption = "Five-year portfolio expected loss with and without the CLIMACRED climate adjustment."
+  )
+```
+
+### Table 6.11 {#result-table-6-11}
+
+```{r table-6-11}
+companion_kable(
+  coal_hwtp_el_steps,
+  caption = "Coal expected-loss mechanics under Highway to Paris.",
+  row.names = FALSE
+)
+```
+
+```{r step-028}
+plot_fig_climate_pv_expected_loss <- ggplot(mutate(tidyr::pivot_longer(portfolio_horizon_loss, cols = c(baseline_pv_el, climate_pv_el),
+    names_to = "case", values_to = "pv_expected_loss"), case = recode(case, baseline_pv_el = "Baseline",
+    climate_pv_el = "Climate-adjusted")), aes(x = scenario_label, y = pv_expected_loss/1e+06,
+    fill = case)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.62)
+```
+
+### Figure 6.2 {#result-figure-6-2}
+
+```{r figure-6-2}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 6.2. Portfolio expected loss with and without CLIMACRED climate adjustments."
+plot_fig_climate_pv_expected_loss +
+  geom_text(aes(label = paste0("$", fmt_num(pv_expected_loss/1e+06, 1), "m")), position = position_dodge(width = 0.7),
+    vjust = -0.35, size = 3.4) +
+  scale_fill_manual(values = c(Baseline = "#666666", `Climate-adjusted` = "#B22222")) +
+  scale_x_discrete(labels = scales::label_wrap(18)) +
+  labs(x = NULL, y = "Present value expected loss (USD millions)", fill = NULL, caption = "Source: NGFS Short-term Scenario Explorer, CLIMACRED.") +
+  expand_limits(y = max(portfolio_horizon_loss$climate_pv_el)/1e+06 * 1.12) +
+  theme(legend.position = "bottom", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid.major.x = element_blank())
+```
+
+## 6.6 Which sectors drive the increase
+
+```{r step-030}
+plot_fig_climate_sector_contribution <- ggplot(horizon_loss, aes(x = incremental_pv_el/1e+06, y = reorder(portfolio_sector, incremental_pv_el),
+    fill = scenario_label)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65, alpha = 0.9)
+```
+
+### Figure 6.3 {#result-figure-6-3}
+
+```{r figure-6-3}
+#| fig-width: 5.5
+#| fig-height: 5.4
+#| fig-cap: "Figure 6.3. Sector contributions to incremental climate expected loss."
+plot_fig_climate_sector_contribution +
+  scale_fill_manual(values = book_palette[names(book_palette) != "Baseline"]) +
+  guides(fill = guide_legend(ncol = 1)) +
+  labs(x = "Incremental PV expected loss (USD millions)", y = NULL, fill = NULL, caption = "Source: NGFS Short-term Scenario Explorer, CLIMACRED.") +
+  theme(legend.position = "bottom", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid.major.y = element_blank())
+```
+
+### Following coal and power into portfolio losses
+
+```{r step-032}
+sector_reading <- horizon_loss |>
+  filter(scenario == "HWTP", portfolio_sector %in% c("Coal", "Power"))
+coal_loss_reading <- sector_reading |> filter(portfolio_sector == "Coal")
+power_loss_reading <- sector_reading |> filter(portfolio_sector == "Power")
+power_hwtp_2030 <- climate_credit |>
+  filter(scenario == "HWTP", year == 2030, portfolio_sector == "Power")
+```
+
+```{r step-033}
+pd_heatmap <- climate_credit |>
+  filter(year == 2030) |>
+  mutate(
+    pd_adjustment_pp = 100 * pd_adjustment
+  )
+
+plot_fig_climate_pd_adjustment_heatmap <- ggplot(pd_heatmap, aes(x = scenario_label, y = reorder(portfolio_sector, pd_adjustment_pp),
+    fill = pd_adjustment_pp)) +
+  geom_tile(color = "white", linewidth = 0.35)
+```
+
+### Figure 6.4 {#result-figure-6-4}
+
+```{r figure-6-4}
+#| fig-width: 5.5
+#| fig-height: 5.6
+#| fig-cap: "Figure 6.4. Climate PD adjustments by scenario and sector in 2030."
+plot_fig_climate_pd_adjustment_heatmap +
+  geom_text(aes(label = fmt_num(pd_adjustment_pp, 1),
+                color = abs(pd_adjustment_pp) > 0.6 * max(abs(pd_heatmap$pd_adjustment_pp))),
+            size = 3.2) +
+  scale_color_manual(values = c(`FALSE` = "#222222", `TRUE` = "white"), guide = "none") +
+  scale_fill_gradient2(low = "#0072B2", mid = "white", high = "#B22222",
+                       midpoint = 0, name = "PD adjustment\n(pp)") +
+  scale_x_discrete(labels = scales::label_wrap(16)) +
+  scale_y_discrete(labels = scales::label_wrap(23)) +
+  labs(x = NULL, y = NULL, caption = "Source: NGFS Short-term Scenario Explorer, CLIMACRED.") +
+  theme(legend.position = "right", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid = element_blank())
+```
+
+```{r step-035}
+path_sectors <- c(
+  "Coal",
+  "Power Supply",
+  "Land transport",
+  "Computer, electronic and optical products"
+)
+
+pd_path <- climate_credit |>
+  filter(
+    scenario == "HWTP",
+    ngfs_sector %in% path_sectors
+  ) |>
+  select(
+    year,
+    portfolio_sector,
+    baseline_pd,
+    climate_pd
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(baseline_pd, climate_pd),
+    names_to = "case",
+    values_to = "pd"
+  ) |>
+  mutate(
+    case = recode(
+      case,
+      baseline_pd = "Baseline",
+      climate_pd = "Climate-adjusted"
+    )
+  )
+
+plot_fig_climate_pd_paths <- ggplot(pd_path, aes(x = year, y = pd, color = case, linetype = case)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.2, alpha = 0.85) +
+  facet_wrap(~portfolio_sector, ncol = 2, labeller = label_wrap_gen(22))
+```
+
+### Figure 6.5 {#result-figure-6-5}
+
+```{r figure-6-5}
+#| fig-width: 5.5
+#| fig-height: 5.3
+#| fig-cap: "Figure 6.5. Baseline and climate-adjusted PD paths under Highway to Paris."
+plot_fig_climate_pd_paths +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_color_manual(values = c(Baseline = "#666666", `Climate-adjusted` = "#B22222"), breaks = c("Baseline",
+    "Climate-adjusted")) +
+  scale_linetype_manual(values = c(Baseline = "dashed", `Climate-adjusted` = "solid"), breaks = c("Baseline",
+    "Climate-adjusted")) +
+  labs(x = NULL, y = "One-year PD", color = NULL, linetype = NULL, caption = "Source: NGFS Short-term Scenario Explorer, CLIMACRED. Scenario: Highway to Paris.") +
+  theme(legend.position = "bottom", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid.minor = element_blank())
+```
+
+## 6.7 Spreads, bond prices, and CDS compensation
+
+```{r step-037}
+market_snapshot <- climate_credit |>
+  filter(year == 2030) |>
+  transmute(
+    scenario_label,
+    portfolio_sector,
+    spread_adjustment_bps = corporate_bond_spread_adjustment * 10000,
+    price_adjustment_pct = corporate_bond_price_rel_adjustment * 100
+  )
+
+top_market_move <- market_snapshot |>
+  arrange(desc(spread_adjustment_bps)) |>
+  slice(1)
+```
+
+### Table 6.12 {#result-table-6-12}
+
+```{r table-6-12}
+market_snapshot |>
+  arrange(scenario_label, desc(spread_adjustment_bps)) |>
+  group_by(scenario_label) |>
+  slice_head(n = 3) |>
+  ungroup() |>
+  transmute(
+    Scenario = scenario_label,
+    Sector = portfolio_sector,
+    `Spread adjustment` = fmt_bps_label(spread_adjustment_bps, 0),
+    `Bond price adjustment` = fmt_pct(price_adjustment_pct / 100, 2)
+  ) |>
+  companion_kable(
+    caption = "Largest 2030 CLIMACRED corporate bond spread adjustments by scenario."
+  )
+```
+
+### Comparing spread adjustments with a default-loss benchmark
+
+```{r step-039}
+spread_bridge <- climate_credit |>
+  filter(year == 2030) |>
+  mutate(
+    default_loss_change_bps = lgd * (climate_pd - baseline_pd) * 10000,
+    ngfs_spread_bps = corporate_bond_spread_adjustment * 10000
+  )
+
+spread_bridge_gap <- spread_bridge |>
+  mutate(spread_gap_bps = ngfs_spread_bps - default_loss_change_bps)
+
+largest_spread_gap <- spread_bridge_gap |>
+  arrange(desc(spread_gap_bps)) |>
+  slice(1)
+
+smallest_spread_gap <- spread_bridge_gap |>
+  arrange(spread_gap_bps) |>
+  slice(1)
+
+plot_fig_climate_cds_spread_bridge <- ggplot(spread_bridge, aes(x = default_loss_change_bps, y = ngfs_spread_bps, color = scenario_label)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#666666", linewidth = 0.35) +
+  geom_point(size = 3, alpha = 0.85) +
+  facet_wrap(~scenario_label, ncol = 1, labeller = label_wrap_gen(24))
+```
+
+### Figure 6.6 {#result-figure-6-6}
+
+```{r figure-6-6}
+#| fig-width: 5.5
+#| fig-height: 5.4
+#| fig-cap: "Figure 6.6. CLIMACRED bond spread adjustments compared with changes in the PD x LGD benchmark."
+plot_fig_climate_cds_spread_bridge +
+  scale_color_manual(values = book_palette[names(book_palette) != "Baseline"]) +
+  labs(x = "Change in PD x LGD benchmark (bps)", y = "NGFS corporate bond spread adjustment (bps)",
+    color = NULL, caption = "Source: NGFS Short-term Scenario Explorer, CLIMACRED.") +
+  theme(legend.position = "none", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid.minor = element_blank())
+```
+
+### Locating coal and power on the spread comparison
+
+```{r step-041}
+coal_spread_reading <- spread_bridge_gap |>
+  filter(scenario == "HWTP", portfolio_sector == "Coal")
+power_spread_reading <- spread_bridge_gap |>
+  filter(scenario == "HWTP", portfolio_sector == "Power")
+```
+
+## 6.8 Portfolio loss simulation
+
+### What one sector default represents
+
+```{r step-042}
+simulate_climate_losses <- function(pd_baseline,
+                                    pd_climate,
+                                    ead,
+                                    recovery,
+                                    rho = 0.25,
+                                    n_sims = 50000,
+                                    seed = 202606) {
+  set.seed(seed)
+
+  n_sectors <- length(pd_baseline)
+  common_factor <- rnorm(n_sims)
+  idiosyncratic <- matrix(
+    rnorm(n_sims * n_sectors),
+    nrow = n_sims,
+    ncol = n_sectors
+  )
+
+  credit_score <- sqrt(rho) * common_factor +
+    sqrt(1 - rho) * idiosyncratic
+
+  loss_given_default <- ead * (1 - recovery)
+
+  baseline_defaults <- sweep(
+    credit_score,
+    2,
+    qnorm(pd_baseline),
+    "<"
+  )
+
+  climate_defaults <- sweep(
+    credit_score,
+    2,
+    qnorm(pd_climate),
+    "<"
+  )
+
+  losses <- tibble::tibble(
+    case = rep(c("Baseline", "Climate-adjusted"), each = n_sims),
+    loss = c(
+      as.numeric(baseline_defaults %*% loss_given_default),
+      as.numeric(climate_defaults %*% loss_given_default)
+    )
+  )
+
+  list(
+    losses = losses,
+    credit_score = credit_score,
+    baseline_defaults = baseline_defaults,
+    climate_defaults = climate_defaults
+  )
+}
+
+simulation_input <- climate_credit |>
+  filter(
+    year == 2030,
+    scenario == "HWTP"
+  ) |>
+  arrange(portfolio_sector)
+
+climate_simulation <- simulate_climate_losses(
+  pd_baseline = simulation_input$baseline_pd,
+  pd_climate = simulation_input$climate_pd,
+  ead = simulation_input$ead,
+  recovery = simulation_input$recovery
+)
+
+simulated_losses <- climate_simulation$losses
+
+loss_summary <- simulated_losses |>
+  group_by(case) |>
+  summarise(
+    mean_loss = mean(loss),
+    var_95 = as.numeric(quantile(loss, 0.95, type = 1)),
+    es_95 = expected_shortfall(loss, 0.95),
+    .groups = "drop"
+  )
+
+loss_lift <- loss_summary |>
+  mutate(case_id = if_else(case == "Baseline", "baseline", "climate")) |>
+  select(case_id, mean_loss, var_95, es_95) |>
+  tidyr::pivot_wider(
+    names_from = case_id,
+    values_from = c(mean_loss, var_95, es_95)
+  ) |>
+  mutate(
+    mean_increase = mean_loss_climate - mean_loss_baseline,
+    var_increase = var_95_climate - var_95_baseline,
+    es_increase = es_95_climate - es_95_baseline
+  )
+```
+
+### Table 6.13 {#result-table-6-13}
+
+```{r table-6-13}
+loss_summary |>
+  transmute(
+    Case = case,
+    `Mean loss` = fmt_usd_m(mean_loss),
+    `95% VaR` = fmt_usd_m(var_95),
+    `95% expected shortfall` = fmt_usd_m(es_95)
+  ) |>
+  companion_kable(
+    caption = "One-year simulated portfolio loss in 2030 under Highway to Paris."
+  )
+```
+
+### From one simulated row to a monetary loss
+
+```{r step-044}
+base_events <- climate_simulation$baseline_defaults
+climate_events <- climate_simulation$climate_defaults
+climate_trace_row <- which(
+  rowSums(base_events) == 1 & rowSums(climate_events) == 2 &
+  rowSums(base_events & !climate_events) == 0
+)[1]
+climate_trace_sectors <- which(climate_events[climate_trace_row, ])
+climate_trace <- simulation_input[climate_trace_sectors, ] |>
+  mutate(
+    score = climate_simulation$credit_score[
+      climate_trace_row, climate_trace_sectors
+    ],
+    baseline_cutoff = qnorm(baseline_pd),
+    climate_cutoff = qnorm(climate_pd),
+    baseline_loss = ead * lgd * base_events[
+      climate_trace_row, climate_trace_sectors
+    ],
+    climate_loss = ead * lgd
+  )
+```
+
+### Table 6.14 {#result-table-6-14}
+
+```{r table-6-14}
+climate_trace |>
+  transmute(
+    Sector = portfolio_sector,
+    `Credit score` = fmt_num(score, 4),
+    `Baseline cutoff` = fmt_num(baseline_cutoff, 4),
+    `Climate cutoff` = fmt_num(climate_cutoff, 4)
+  ) |>
+  companion_kable(caption = "Credit scores and default cutoffs for two sectors in one simulated row.")
+```
+
+### Comparing baseline and climate-adjusted losses
+
+```{r step-046}
+plot_fig_climate_loss_simulation <- ggplot(simulated_losses, aes(x = loss/1e+06, fill = case)) +
+  geom_histogram(binwidth = 2.5, position = "identity", alpha = 0.55, boundary = 0, color = "white")
+```
+
+### Figure 6.7 {#result-figure-6-7}
+
+```{r figure-6-7}
+#| fig-width: 5.5
+#| fig-height: 4
+#| fig-cap: "Figure 6.7. Baseline and climate-adjusted portfolio loss distributions under Highway to Paris."
+plot_fig_climate_loss_simulation +
+  geom_vline(data = loss_summary, aes(xintercept = var_95/1e+06, color = case), linetype = "dashed",
+    linewidth = 0.8) +
+  scale_fill_manual(values = c(Baseline = "#666666", `Climate-adjusted` = "#B22222"), breaks = c("Baseline",
+    "Climate-adjusted")) +
+  scale_color_manual(values = c(Baseline = "#666666", `Climate-adjusted` = "#B22222"), breaks = c("Baseline",
+    "Climate-adjusted")) +
+  labs(x = "Portfolio loss (USD millions)", y = "Simulated scenarios", fill = NULL, color = NULL,
+    caption = "Dashed lines show 95% VaR. Scenario: Highway to Paris, year 2030.") +
+  guides(color = "none") +
+  theme(legend.position = "bottom", legend.background = element_rect(fill = "white", colour = NA),
+    panel.grid.minor = element_blank())
+```
+
+## Session and numeric results
+
+```{r companion-results}
+companion_finish(knitr::knit_global())
+```
