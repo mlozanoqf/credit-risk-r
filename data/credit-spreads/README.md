@@ -3,6 +3,19 @@
 The CSV files are extracted observations, not simulated prices. Reproduction
 uses these fixed files rather than downloading a changing market snapshot.
 
+## Source rights
+
+The author decided on 14 October 2026 to retain the 19-observation iShares
+extract. Written redistribution permission has not been confirmed. The
+[BlackRock terms](https://www.blackrock.com/corporate/compliance/terms-and-conditions)
+restrict public or commercial reuse without written permission; the holdings
+disclaimer also identifies third-party pricing providers. Retention is an author
+decision, not a grant of rights from the source. The repository's code license
+does not license these observations. Their public availability should not be
+interpreted as confirmation of unrestricted redistribution rights.
+
+## Provenance and interpretation
+
 - `corporate-bond-snapshot.csv`: nine CCO Holdings LLC 144A bonds from HYG and
   ten Verizon Communications Inc bonds from LQD, holdings dated 2026-09-28.
   The source field is Price; it is treated as a clean valuation mark, not an
