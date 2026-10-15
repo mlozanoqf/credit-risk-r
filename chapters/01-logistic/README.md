@@ -1,7 +1,7 @@
 # Logistic credit scoring
 
-**Dataset pending.** The code is available, but full execution and exact
-reproduction require the temporarily excluded credit-scoring dataset.
+**Frozen data included.** The complete private checkout supplies the dataset
+used for this chapter, with a source and modification notice.
 See [availability and dictionary](../../data/credit-scoring/README.md).
 
 From the project root:

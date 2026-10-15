@@ -2,13 +2,12 @@
 
 ## Availability
 
-The dataset is temporarily excluded from this public repository while
-redistribution permission is being clarified. This dictionary documents the
-expected input; it does not provide the records or a download workaround.
-Chapters 1 and 2 cannot reproduce the book results without this file.
-A reader who has an authorized copy can place it at
-`data/credit-scoring/credit_scoring.rds` and run `Rscript checks/check-inputs.R`.
-The file is ignored by Git to prevent accidental publication.
+The complete frozen dataset is included in this private repository at
+`data/credit-scoring/credit_scoring.rds`. Run `Rscript checks/check-inputs.R`
+to check its identity before reproducing Chapters 1 and 2. The
+[provenance note](PROVENANCE.md) identifies Lore Dirick's DataCamp course as
+the source, describes the semi-synthetic adaptation and records the current
+access and rights status. Future public redistribution remains under review.
 
 ## Dictionary
 

@@ -6,7 +6,9 @@ build the publisher PDF. See [release status](RELEASE_STATUS.md).
 
 **Pre-publication access:** this repository is private while the book is being
 prepared. Public access is planned for the book's publication, at the same URL.
-The credit-scoring data remain excluded pending redistribution permission.
+The complete frozen credit-scoring data are included for authorized repository
+users. See the [provenance and modifications](data/credit-scoring/PROVENANCE.md);
+future public redistribution remains a separate release review.
 
 Download the complete repository using **Code > Download ZIP** on GitHub and
 extract it, or clone it with Git. Each chapter has an editable `chapter.qmd`;
@@ -14,11 +16,11 @@ execution also uses the repository's data, helpers and recorded dependencies.
 
 ## Data availability
 
-The credit-scoring dataset is temporarily excluded while redistribution
-permission is being clarified. Chapters 1 and 2 include their complete code,
-but require that dataset to reproduce the book results. They stop with an
-explanatory message when it is absent. No replacement data are downloaded.
-See the [data dictionary](data/credit-scoring/README.md).
+Chapters 1 and 2 include their complete code and the frozen
+`data/credit-scoring/credit_scoring.rds` input (30,024 records before cleaning).
+Download the whole repository so that its helpers and data remain together.
+No replacement data are downloaded. See the
+[data dictionary](data/credit-scoring/README.md) and its source notice.
 Foundations and Chapters 3-6 have separate inputs and can run independently.
 
 ## Setup
@@ -106,8 +108,8 @@ units, including the locally held credit-scoring dataset, passed validation
 from an extracted ZIP with a newly restored library
 and package caching disabled on Windows 11. The checks matched 991 numerical
 objects, 126 CSV tables and all 85 numbered figures against the reference.
-That full-data validation is distinct from this public distribution, which
-omits the credit-scoring dataset. It does not cover macOS/Linux or future
+That validation predates the private inclusion of the scoring data.
+It does not cover macOS/Linux or future
 package updates.
 
 ## Licensing and availability

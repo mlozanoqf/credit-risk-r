@@ -3,8 +3,8 @@ require_chapter_inputs <- function(chapter) {
   if (chapter %in% c("01-logistic", "02-tree-based") && !file.exists(scoring)) {
     stop(
       "Chapters 1 and 2 require ", scoring, ". ",
-      "This dataset is temporarily excluded pending redistribution permission. ",
-      "The complete code is available, but exact reproduction needs an authorized copy. ",
+      "The frozen dataset is included in the private companion checkout. ",
+      "Download or clone the complete repository rather than an individual QMD. ",
       "See data/credit-scoring/README.md. No replacement data are downloaded.",
       call. = FALSE
     )

@@ -1,4 +1,21 @@
-# Initial companion release
+# Companion release status
+
+## Current private distribution: 15 October 2026
+
+The author authorized inclusion of the complete frozen scoring dataset in
+this private repository, with source attribution and a description of the
+modifications. See [provenance](data/credit-scoring/PROVENANCE.md).
+This supersedes the input exclusion in the initial-release record below.
+Future public redistribution remains a separate review. Repository visibility,
+model specifications, data values and dependency versions are unchanged.
+
+The October 15 rerun uses the recorded, already installed Windows environment,
+rather than a fresh package installation. Both scoring chapters execute
+independently. All 393 saved numeric objects are identical to their preceding
+R values at tolerance zero (RDS container bytes differ). All six frozen
+inputs match their recorded hashes. The same RDS is used by the book and Python.
+
+## Initial companion release
 
 Prepared for public release on 12 October 2026.
 Book reference: review build 11 October 2026, 04:10:23 -06:00.
