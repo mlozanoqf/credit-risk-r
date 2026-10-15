@@ -6,9 +6,7 @@ build the publisher PDF. See [release status](RELEASE_STATUS.md).
 
 **Pre-publication access:** this repository is private while the book is being
 prepared. Public access is planned for the book's publication, at the same URL.
-The complete frozen credit-scoring data are included for authorized repository
-users. See the [provenance and modifications](data/credit-scoring/PROVENANCE.md);
-future public redistribution remains a separate release review.
+The complete frozen credit-scoring data are included. See the [provenance and modifications](data/credit-scoring/PROVENANCE.md).
 
 Download the complete repository using **Code > Download ZIP** on GitHub and
 extract it, or clone it with Git. Each chapter has an editable `chapter.qmd`;
@@ -104,13 +102,11 @@ Run `Rscript checks/check-inputs.R` to verify frozen input checksums. Revalidate
 `results-index.csv` when book numbering changes; this technical index maps source
 blocks to generated files for the execution checks. The chapter README indexes
 provide the reader-facing navigation. On 11 October 2026, all seven
-units, including the locally held credit-scoring dataset, passed validation
+units, including both credit-scoring chapters, passed validation
 from an extracted ZIP with a newly restored library
 and package caching disabled on Windows 11. The checks matched 991 numerical
 objects, 126 CSV tables and all 85 numbered figures against the reference.
-That validation predates the private inclusion of the scoring data.
-It does not cover macOS/Linux or future
-package updates.
+It does not cover macOS/Linux or future package updates.
 
 ## Licensing and availability
 

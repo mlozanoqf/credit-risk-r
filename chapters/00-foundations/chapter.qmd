@@ -97,6 +97,18 @@ c(year2_conditional_pd = year2_conditional_pd,
   cumulative_two_year_pd = cumulative_two_year_pd)
 ```
 
+### Learning a default probability from borrower information
+
+The historical segment frequencies supply a simple fitted risk rule for new
+applicants. Their segment is known at application; their future outcome is
+still unknown. Chapter 1 estimates richer rules from several characteristics.
+
+```{r foundations-segment-predictions}
+new_applicant_segment <- c("A", "B", "B")
+new_applicant_pd <- unname(segment_pd[new_applicant_segment])
+new_applicant_pd
+```
+
 ## Expected outcomes and dollar losses
 
 ```{r step-009}
@@ -190,6 +202,52 @@ q95_together <- loss_values[which(cdf_together >= 0.95)[1]]
 c(q95_independent = q95_independent, q95_together = q95_together)
 ```
 
+### Simulating the same two-loan portfolio
+
+Each vector position is a scenario for the same two loans. Independent uniform
+draws give separate defaults; a shared default outcome makes both loans default
+together. Each loan retains its supplied 10% PD in both models.
+
+```{r foundations-simulation}
+set.seed(20261014)
+n_scenarios <- 10000
+draw_1 <- runif(n_scenarios)
+draw_2 <- runif(n_scenarios)
+default_1 <- draw_1 < 0.10
+default_2 <- draw_2 < 0.10
+sim_loss_independent <- 5000 * (default_1 + default_2)
+sim_loss_together <- 10000 * default_1
+simulation_example <- which(default_1 & default_2)[1]
+c(scenario = simulation_example,
+  draw_1 = draw_1[simulation_example],
+  draw_2 = draw_2[simulation_example],
+  loss = sim_loss_independent[simulation_example])
+```
+
+```{r foundations-simulation-check}
+simulation_check <- data.frame(
+  dependence = c("Independent", "Always together"),
+  exact_mean_loss = c(mean_independent, mean_together),
+  simulated_mean_loss = c(mean(sim_loss_independent),
+    mean(sim_loss_together)),
+  exact_joint_pd = c(0.10^2, 0.10),
+  simulated_joint_pd = c(mean(default_1 & default_2),
+    mean(default_1))
+)
+knitr::kable(data.frame(
+  Dependence = simulation_check$dependence,
+  `Exact mean ($)` = fmt_num(simulation_check$exact_mean_loss, 2),
+  `Simulated mean ($)` = fmt_num(simulation_check$simulated_mean_loss, 2),
+  `Exact joint PD` = fmt_pct(simulation_check$exact_joint_pd, 2),
+  `Simulated joint PD` = fmt_pct(simulation_check$simulated_joint_pd, 2),
+  check.names = FALSE
+))
+```
+
+Simulation approximates the consequences of supplied credit assumptions.
+Larger runs reduce Monte Carlo variability; borrower-risk evidence is needed
+separately to choose those assumptions.
+
 ## Standardized scores, logarithms, and probabilities
 
 ```{r step-018}
@@ -263,6 +321,46 @@ c(continuous_rate = continuous_rate,
   exponential_factor = discount_exponential)
 ```
 
+### A default probability implied by a bond price
+
+The constructed example assumes an observed one-year bond price of exactly
+94/1.05, a promised payment of 100 and recovery of 40 at maturity. Calibrate
+the default pricing probability using the effective risk-free rate of 5%.
+Repricing the input bond verifies the calibration; it is not independent
+evidence of cheapness or a real-world default-frequency estimate.
+
+```{r foundations-bond-calibration}
+bond_face <- 100
+bond_recovery <- 40
+bond_rf <- 0.05
+bond_price <- 94 / (1 + bond_rf)
+bond_q <- (bond_face - bond_price * (1 + bond_rf)) /
+  (bond_face - bond_recovery)
+bond_expected_payment <- (1 - bond_q) * bond_face + bond_q * bond_recovery
+bond_repriced <- bond_expected_payment / (1 + bond_rf)
+round(c(price = bond_price, default_probability = bond_q,
+        expected_payment = bond_expected_payment,
+        repriced_bond = bond_repriced), 4)
+```
+
+### Using the same states to value default protection
+
+Protection pays 60 if this same bond defaults and zero otherwise, at the same
+one-year maturity and without counterparty risk. Bond plus protection pays
+100 in both states. Frictionless trading and short selling imply that its
+price equals the risk-free bond price. The two methods below must agree.
+
+```{r foundations-default-protection}
+bond_risk_free_price <- bond_face / (1 + bond_rf)
+protection_payment <- bond_face - bond_recovery
+protection_from_prices <- bond_risk_free_price - bond_price
+protection_from_q <- protection_payment * bond_q / (1 + bond_rf)
+round(c(risk_free_bond = bond_risk_free_price,
+        risky_bond = bond_price,
+        protection_from_prices = protection_from_prices,
+        protection_from_q = protection_from_q), 4)
+```
+
 ## Sampling uncertainty, assumptions, and scenarios
 
 ```{r step-025}
@@ -280,6 +378,10 @@ scenario_el <- scenario_pd * 10000 * 0.60
 scenario_el
 unname(scenario_el["Stress"] - scenario_el["Baseline"])
 ```
+
+Conditioning a PD on economic conditions specifies a scenario. It does not
+automatically turn that PD into a risk-neutral pricing probability. Identify
+the probability's interpretation before using it for forecasting or valuation.
 
 ### From foundations to lending decisions
 

@@ -13,3 +13,11 @@ for where to find the files created on your computer.
 
 Foundations uses unnumbered worked calculations. Follow them in `chapter.qmd`
 from the beginning.
+
+The segment-prediction and two-loan simulation blocks match the October 14
+Foundations additions. Setup uses `shared/formatting.R` and
+`shared/figure-theme.R` from this repository root, as printed in the book.
+The October 15 bond example calibrates a risk-neutral default probability
+and values default protection by both replication and discounted expected
+payment. These blocks, the supplied-PD simulation and the historical-frequency
+prediction rule are independent of the Chapter 1/2 loan dataset.

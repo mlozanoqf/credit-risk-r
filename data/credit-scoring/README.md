@@ -2,12 +2,11 @@
 
 ## Availability
 
-The complete frozen dataset is included in this private repository at
+The complete frozen dataset is included in the repository at
 `data/credit-scoring/credit_scoring.rds`. Run `Rscript checks/check-inputs.R`
 to check its identity before reproducing Chapters 1 and 2. The
 [provenance note](PROVENANCE.md) identifies Lore Dirick's DataCamp course as
-the source, describes the semi-synthetic adaptation and records the current
-access and rights status. Future public redistribution remains under review.
+the source and describes the semi-synthetic adaptation.
 
 ## Dictionary
 
@@ -38,7 +37,3 @@ within this file, not a persistent customer identifier. Chapter 1 creates a
 random training/test partition after cleaning; Chapter 2 reuses that partition.
 `loan_status` supplies the outcome for model estimation and evaluation. It is
 excluded from the predictors supplied for a new applicant.
-
-This dictionary describes the fields and does not grant additional rights to
-redistribute the data. Any accompanying data-use terms apply separately from
-the repository's code license.
