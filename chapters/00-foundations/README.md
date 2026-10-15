@@ -6,14 +6,10 @@ From the project root:
 Rscript run.R 00-foundations
 ```
 
-This runs the complete chapter in a new R process and writes an HTML results
-report, PNG figures, CSV/RDS table inputs, numeric results and session information.
-The `chapter.qmd` is the editable source. Code is visible, including formatting.
-Run preceding blocks before executing an individual result block.
+Open [chapter.qmd](chapter.qmd) to read or edit the code. The command above runs the
+complete chapter in a new R session. Run setup and preceding calculations before
+executing an individual block. See [generated results](../../README.md#output)
+for where to find the files created on your computer.
 
-## Book result index
-
-| Result | Title | Code | Generated file |
-|---|---|---|---|
-
-Foundations uses unnumbered worked calculations. Run all blocks in order.
+Foundations uses unnumbered worked calculations. Follow them in `chapter.qmd`
+from the beginning.

@@ -4,6 +4,10 @@ Computational companion by Martín Lozano. Reproduce and extend the book
 calculations, tables and figures chapter by chapter. This repository does not
 build the publisher PDF. See [release status](RELEASE_STATUS.md).
 
+Download the complete repository using **Code > Download ZIP** on GitHub and
+extract it, or clone it with Git. Each chapter has an editable `chapter.qmd`;
+execution also uses the repository's data, helpers and recorded dependencies.
+
 ## Data availability
 
 The credit-scoring dataset is temporarily excluded while redistribution
@@ -63,18 +67,18 @@ project root and run setup and prerequisite calculations first.
 - [Portfolio Credit Risk with Copulas](chapters/05-copulas/README.md) (`05-copulas`).
 - [Climate Credit Risk](chapters/06-climate-credit-risk/README.md) (`06-climate-credit-risk`).
 
-## Locate results
+## Find the code for a book result
 
-The [result index](results-index.csv) maps every numbered figure/table in the
-reference book to its chapter, source block and generated file. Each chapter
-README links to source lines, local HTML results and generated files. The report
-and output links become available after running that chapter. Headers such as
-"Figure 2.6" preserve book numbers;
-HTML does not assign a competing chapter-wide numbering scheme.
+Choose a chapter above. Its README lists each numbered figure and table with
+a **Code** link to the corresponding block in `chapter.qmd`. Run the chapter
+from the beginning so that its data and prerequisite calculations are available.
+Result labels such as "Figure 2.6" retain the book's numbering.
 
 ## Output
 
-`output/<chapter>/chapter.html` contains visible code and results. `figures/`
+After execution, open `output/<chapter>/chapter.html` in your browser to view
+the code and results. These files are created on your computer and are not
+published in this repository. Within `output/<chapter>/`, `figures/`
 contains numbered PNGs; `tables/` contains CSV and RDS inputs passed to table
 formatting, plus rendered table fragments. CSVs can contain display rounding;
 `numeric-results.rds` preserves numerical objects used in the calculations.
@@ -91,7 +95,9 @@ source notes. Generated files go to `output/`, which is not versioned.
 Keep the reference inputs, seeds and software versions unchanged when first
 reproducing results. Record any intentional extension or dependency update.
 Run `Rscript checks/check-inputs.R` to verify frozen input checksums. Revalidate
-`results-index.csv` when book numbering changes. On 11 October 2026, all seven
+`results-index.csv` when book numbering changes; this technical index maps source
+blocks to generated files for the execution checks. The chapter README indexes
+provide the reader-facing navigation. On 11 October 2026, all seven
 units, including the locally held credit-scoring dataset, passed validation
 from an extracted ZIP with a newly restored library
 and package caching disabled on Windows 11. The checks matched 991 numerical
