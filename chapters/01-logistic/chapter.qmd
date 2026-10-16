@@ -1065,7 +1065,7 @@ acceptance_density <- ggplot(
 ```{r figure-1-14}
 #| fig-width: 5.5
 #| fig-height: 3.6
-#| fig-cap: "Figure 1.14. Full model prediction histogram with acceptance-rate cutoff."
+#| fig-cap: "Figure 1.14. Full-model predicted-PD density with the 80% acceptance cutoff."
 acceptance_density_labels <- data.frame(
   x = c(
     min(pred_logi_full) + 0.58 * (cutoff - min(pred_logi_full)),
@@ -2011,7 +2011,7 @@ roc_policy_plot <- ggplot(
 ```{r figure-1-18}
 #| fig-width: 5.5
 #| fig-height: 5.1
-#| fig-cap: "Figure 1.18. Full model in blue, evaluated in two acceptance rates: 65% in black, 80% in red."
+#| fig-cap: "Figure 1.18. Full model in blue, evaluated at two acceptance rates: 65% in black, 80% in red."
 roc_acceptance_labels <- data.frame(
   target = c("Acceptance rate of 80%", "Acceptance rate of 65%"),
   false_positive_rate = roc_acceptance_guides$false_positive_rate,

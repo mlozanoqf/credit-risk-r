@@ -25,6 +25,21 @@ A separate October 12 check of Foundations and Chapters 3-6 reproduced all
 598 numerical objects at tolerance zero, 77 CSV tables byte for byte and
 53 figures pixel for pixel, using the R16-validated package library.
 
+## Integrated verification update, 15 October 2026
+
+All seven chapters were rerun through `run.R` in the recorded environment.
+`checks/verify.R` passed 211 book-result references, 1,214 compact numerical
+checkpoints, input checksums, ordered scoring splits and fresh-output hashes.
+Comparison with the preceding audit found all 1,012 complete numerical objects
+unchanged at tolerance zero. All 85 numbered figures retained identical pixels.
+Five table exports changed only in the intended descriptions or percentage-point
+presentation, including the safer NGFS download instructions.
+
+Offline tests passed 35 deliberate mutation/staleness/navigation/split failures,
+plus download destination and response-validation checks. No live data refresh
+or new package installation was performed. `checks/README.md` explains the
+verification commands and their limits.
+
 ## Package scope
 
 This package contains computations and result captions. Generated reports,

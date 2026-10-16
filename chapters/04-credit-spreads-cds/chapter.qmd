@@ -574,7 +574,7 @@ credit_spread_bond_checkpoint <- data.frame(
     "Credit spread"
   ),
   `What it does` = c(
-    "Sets the default intensity for each period.",
+    "Sets the probability of default during each period, conditional on survival to its start.",
     "Weights promised coupons and principal.",
     "Weights recovery payments in default years.",
     "Determines loss severity if default occurs.",

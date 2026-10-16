@@ -256,9 +256,16 @@ ngfs_post_timeseries <- function(runs, regions, variables, years = integer()) {
 }
 ```
 
+An optional refresh must use a new destination. Sourcing the helper only defines
+functions; the explicit download call requires internet access and the `httr`
+and `jsonlite` packages. Both responses are validated before any files are
+written. Existing destinations are refused, and the frozen `data/climate/`
+inputs remain the default for this chapter.
+
 ```{r step-009}
 #| eval: false
 source("chapters/06-climate-credit-risk/helpers/download-data.R")
+download_ngfs_data(destination = "tmp/ngfs-refresh")
 ```
 
 ### Portfolio inputs and source files
@@ -393,7 +400,7 @@ climate_data_provenance <- data.frame(
   ),
   Role = c(
     "Supplies sector-level climate-credit variables by scenario, region, year, and metric.",
-    "Documents the API request and refreshes the raw CSV files when the data source is available.",
+    "Documents the API request and optionally downloads raw CSV files to an explicit new destination.",
     "Keep the book render reproducible and preserve the original scenario code, variable string, unit, year, and value.",
     "Specifies the portfolio's EAD and recovery assumptions by sector.",
     "Joins scenario data to portfolio assumptions and converts percentage-point variables into decimal credit quantities."

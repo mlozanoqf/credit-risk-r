@@ -11,18 +11,30 @@ using the public IIASA API. The download code is in:
 
 `chapters/06-climate-credit-risk/helpers/download-data.R`
 
-To refresh the data from R:
+To optionally download a fresh extract from R, run from the companion root and
+choose a destination that does not already exist:
 
 ```r
 source("chapters/06-climate-credit-risk/helpers/download-data.R")
+download_ngfs_data(destination = "tmp/ngfs-refresh")
 ```
 
-The refresh script requires internet access and the R packages `httr` and
-`jsonlite`.
+Sourcing the helper only defines functions and constants: it makes no requests,
+creates no files, and does not require optional packages. The explicit download
+call requires internet access and the R packages `httr` and `jsonlite`.
 
-The script requests a guest token, sends a JSON query to the time-series
-endpoint, and writes the API response before the chapter performs any cleaning
-or financial calculations.
+The function refuses any existing destination before making requests, including
+this frozen directory. It requests guest tokens and sends the two JSON queries
+to the time-series endpoint. Both responses must be nonempty tables containing
+`scenario`, `region`, `variable`, `year`, and `value` before the new destination
+is created or any files are written. A query or schema failure leaves the new
+destination absent. All returned columns and raw values are retained, before
+the chapter performs any cleaning or financial calculations.
+
+Fresh extracts do not replace or automatically become the chapter inputs;
+`data/climate/` remains the frozen reference. Inspect a new extract separately.
+The offline regression tests use stub queries and can be run from the companion
+root with `Rscript --vanilla checks/test-download.R`.
 
 Files:
 

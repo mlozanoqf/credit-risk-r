@@ -455,7 +455,7 @@ xgb_path_settings_table <- data.frame(
     "Learning rate; controls how much each new tree can change the running score.",
     "Uses a fraction of training rows in each boosting round.",
     "Uses a fraction of encoded predictors in each boosting round.",
-    "Requires enough weighted observations before making a child node.",
+    "Sets the minimum sum of curvature weights in each child node.",
     "Regularization penalty on leaf corrections; higher values shrink leaf values.",
     "Initial PD before any tree is added.",
     "Number of boosted trees in the full model.",
@@ -470,6 +470,8 @@ companion_kable(
   row.names = FALSE
 )
 ```
+
+For binary log-loss, each observation contributes a curvature weight (Hessian) $p(1-p)$, where $p$ is its current fitted PD. These weights describe how the loss responds to changes in the model's score. The `min_child_weight` setting requires their sum in each child node to be at least `r xgb_params$min_child_weight`, rather than a count of applicants.
 
 ```{r step-018}
 xgb_checkpoint_models <- lapply(xgb_checkpoint_rounds, function(rounds) {

@@ -472,7 +472,7 @@ one_firm_check <- data.frame(
   Input_PD = fmt_pct(one_firm_pd, 2),
   Default_threshold = fmt_num(one_firm_threshold, 6),
   Simulated_PD = fmt_pct(one_firm_sim_pd, 2),
-  Difference = fmt_pct(one_firm_sim_pd - one_firm_pd, 2)
+  Difference = paste0(fmt_num(100 * (one_firm_sim_pd - one_firm_pd), 2), " pp")
 )
 
 names(one_firm_check) <- c(
@@ -1626,7 +1626,7 @@ credit_var_code_bridge_table <- data.frame(
   `Role in the calculation` = c(
     "Average cumulative default probability for each name.",
     "Common-factor correlation that controls co-default risk.",
-    "Tail probability level used to select a bad common-factor state.",
+    "Confidence level used to select the loss percentile; the tail probability is 1-alpha.",
     "Portfolio exposure at default.",
     "Loss severity after recovery.",
     "Tail default rate implied by the common-factor state.",

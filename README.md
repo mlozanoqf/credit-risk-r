@@ -108,6 +108,22 @@ and package caching disabled on Windows 11. The checks matched 991 numerical
 objects, 126 CSV tables and all 85 numbered figures against the reference.
 It does not cover macOS/Linux or future package updates.
 
+## Checks
+
+After running all seven chapters through `run.R`, verify their inputs, book
+numbering and code links, fresh outputs and numerical regression references:
+
+```sh
+Rscript checks/verify.R
+Rscript checks/test-verification.R
+Rscript checks/test-download.R
+```
+
+The references describe the recorded R environment. After changing sources, rerun
+the chapters before verification. A deliberate extension may change the numerical
+references; investigate those differences before updating the references. See
+[verification details](checks/README.md) for the scope of these checks.
+
 ## Licensing and availability
 
 The author-supplied analysis code is licensed under GPL-3.0; see [LICENSE](LICENSE).
