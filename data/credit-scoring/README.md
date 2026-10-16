@@ -5,15 +5,13 @@
 The complete frozen dataset is included in the repository at
 `data/credit-scoring/credit_scoring.rds`. Run `Rscript checks/check-inputs.R`
 to check its identity before reproducing Chapters 1 and 2. The
-[provenance note](PROVENANCE.md) identifies Lore Dirick's DataCamp course as
-the source and describes the semi-synthetic adaptation.
+[provenance note](PROVENANCE.md) identifies the source.
+
+The examples use a substantially modified, semi-synthetic dataset derived from the loan data accompanying Lore Dirick's DataCamp course, *Credit Risk Modeling in R*. The data support the applications in Chapters 1 and 2 and do not represent a particular lender's portfolio.
 
 ## Dictionary
 
-`credit_scoring.rds` is the semi-synthetic dataset used in the
-publication manuscript's first two chapters. It contains 30,024 loan records
-and ten variables. Results describe this sample; they are not estimates
-of default rates for a named lender or a defined borrower population.
+`credit_scoring.rds` contains 30,024 loan records and ten variables.
 
 Read the file from the project root with `readRDS("data/credit-scoring/credit_scoring.rds")`.
 The analysis begins with the supplied records and includes data-quality checks

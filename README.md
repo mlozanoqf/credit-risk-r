@@ -6,7 +6,7 @@ build the publisher PDF. See [release status](RELEASE_STATUS.md).
 
 **Pre-publication access:** this repository is private while the book is being
 prepared. Public access is planned for the book's publication, at the same URL.
-The complete frozen credit-scoring data are included. See the [provenance and modifications](data/credit-scoring/PROVENANCE.md).
+The complete frozen credit-scoring data are included. See the [provenance note](data/credit-scoring/PROVENANCE.md).
 
 Download the complete repository using **Code > Download ZIP** on GitHub and
 extract it, or clone it with Git. Each chapter has an editable `chapter.qmd`;

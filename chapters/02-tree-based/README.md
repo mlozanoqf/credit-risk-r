@@ -1,7 +1,7 @@
 # Tree-based credit scoring
 
 **Frozen data included.** The complete repository supplies the dataset
-used for this chapter, with a source and modification notice.
+used for this chapter, with a brief provenance note.
 See [availability and dictionary](../../data/credit-scoring/README.md).
 
 From the project root:
