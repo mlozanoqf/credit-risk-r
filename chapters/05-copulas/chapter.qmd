@@ -1076,6 +1076,12 @@ companion_kable(
 )
 ```
 
+These losses use five-year default events and fixed exposures and LGDs, with
+no discounting. Expected loss, VaR, and ES therefore share the same five-year,
+undiscounted basis. Interpreting VaR minus expected loss as an additional capital
+buffer assumes that expected loss is covered separately over that horizon,
+for example through pricing income or provisions available to absorb it.
+
 ```{r step-063}
 loss_steps <- 0:loss_n_firms
 

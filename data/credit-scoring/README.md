@@ -35,3 +35,5 @@ within this file, not a persistent customer identifier. Chapter 1 creates a
 random training/test partition after cleaning; Chapter 2 reuses that partition.
 `loan_status` supplies the outcome for model estimation and evaluation. It is
 excluded from the predictors supplied for a new applicant.
+
+The supplied documentation leaves the follow-up horizon for `loan_status` unspecified. In Chapters 1 and 2, a fitted PD estimates the probability of this recorded default label conditional on the model's inputs. Its interpretation as an annual or lifetime PD remains unvalidated and would require a documented observation horizon and outcome validation over that horizon. The expected-loss illustration assumes a matching horizon for PD, LGD, and EAD; interpreting it as annual expected loss would require validation of those inputs for a one-year period.

@@ -1,10 +1,15 @@
 # Climate Credit Risk
 
-From the project root:
+First use? Complete the [setup walkthrough](../../README.md#first-time-prepare-your-computer).
+Open `credit-risk-r.Rproj` and run these commands in the RStudio **Console**:
 
-```sh
-Rscript run.R 06-climate-credit-risk
+```r
+source("start.R")
+start_chapter("06-climate-credit-risk")
 ```
+
+After **Complete:** appears, the browser opens `output/06-climate-credit-risk/chapter.html`.
+If it stays closed, open that file manually from the extracted project folder.
 
 Open [chapter.qmd](chapter.qmd) to read or edit the code. The command above runs the
 complete chapter in a new R session. Run setup and preceding calculations before

@@ -1,10 +1,15 @@
 # Portfolio Credit Risk with Copulas
 
-From the project root:
+First use? Complete the [setup walkthrough](../../README.md#first-time-prepare-your-computer).
+Open `credit-risk-r.Rproj` and run these commands in the RStudio **Console**:
 
-```sh
-Rscript run.R 05-copulas
+```r
+source("start.R")
+start_chapter("05-copulas")
 ```
+
+After **Complete:** appears, the browser opens `output/05-copulas/chapter.html`.
+If it stays closed, open that file manually from the extracted project folder.
 
 Open [chapter.qmd](chapter.qmd) to read or edit the code. The command above runs the
 complete chapter in a new R session. Run setup and preceding calculations before
@@ -33,19 +38,19 @@ for where to find the files created on your computer.
 | Table 5.10 | Default-event probabilities for ten firms under different copula correlations. | [Code](chapter.qmd#L906) |
 | Figure 5.7 | Distribution of the number of defaults by year 5 under different copula correlations. | [Code](chapter.qmd#L937) |
 | Table 5.11 | Portfolio loss summary for a homogeneous ten-firm portfolio. | [Code](chapter.qmd#L1071) |
-| Figure 5.8 | Portfolio loss distribution under different copula correlations. | [Code](chapter.qmd#L1101) |
-| Table 5.12 | Concentration risk with the same total exposure, PD, recovery, and copula correlation. | [Code](chapter.qmd#L1226) |
-| Figure 5.9 | Portfolio loss distributions with the same defaults and different exposure weights. | [Code](chapter.qmd#L1289) |
-| Table 5.13 | Two firms affected by the same t-copula scale draw. | [Code](chapter.qmd#L1466) |
-| Table 5.14 | Default clustering under Gaussian and t-copulas. | [Code](chapter.qmd#L1480) |
-| Table 5.15 | Portfolio loss measures under Gaussian and t-copulas. | [Code](chapter.qmd#L1491) |
-| Figure 5.10 | Default-count distribution under Gaussian and t-copulas. | [Code](chapter.qmd#L1521) |
-| Table 5.16 | Inputs for the Vasicek-style Credit VaR approximation. | [Code](chapter.qmd#L1635) |
-| Table 5.17 | Mapping the Credit VaR notation to the R implementation. | [Code](chapter.qmd#L1678) |
-| Table 5.18 | Numerical substitution for the 99.9% Credit VaR calculation. | [Code](chapter.qmd#L1724) |
-| Table 5.19 | Gaussian Vasicek Credit VaR, expected loss, capital, and expected shortfall. | [Code](chapter.qmd#L1779) |
-| Table 5.20 | The 99.9% Gaussian Credit VaR calculation. | [Code](chapter.qmd#L1809) |
-| Figure 5.11 | Systematic factor and conditional portfolio loss. | [Code](chapter.qmd#L1830) |
-| Table 5.21 | Credit VaR model risk under Gaussian and t-copula assumptions. | [Code](chapter.qmd#L1957) |
-| Figure 5.12 | Loss-tail survival probabilities under Gaussian and t-copulas. | [Code](chapter.qmd#L2003) |
-| Table 5.22 | Monte Carlo precision of the 99.9% expected-shortfall comparison, in USD millions. | [Code](chapter.qmd#L2044) |
+| Figure 5.8 | Portfolio loss distribution under different copula correlations. | [Code](chapter.qmd#L1107) |
+| Table 5.12 | Concentration risk with the same total exposure, PD, recovery, and copula correlation. | [Code](chapter.qmd#L1232) |
+| Figure 5.9 | Portfolio loss distributions with the same defaults and different exposure weights. | [Code](chapter.qmd#L1295) |
+| Table 5.13 | Two firms affected by the same t-copula scale draw. | [Code](chapter.qmd#L1472) |
+| Table 5.14 | Default clustering under Gaussian and t-copulas. | [Code](chapter.qmd#L1486) |
+| Table 5.15 | Portfolio loss measures under Gaussian and t-copulas. | [Code](chapter.qmd#L1497) |
+| Figure 5.10 | Default-count distribution under Gaussian and t-copulas. | [Code](chapter.qmd#L1527) |
+| Table 5.16 | Inputs for the Vasicek-style Credit VaR approximation. | [Code](chapter.qmd#L1641) |
+| Table 5.17 | Mapping the Credit VaR notation to the R implementation. | [Code](chapter.qmd#L1684) |
+| Table 5.18 | Numerical substitution for the 99.9% Credit VaR calculation. | [Code](chapter.qmd#L1730) |
+| Table 5.19 | Gaussian Vasicek Credit VaR, expected loss, capital, and expected shortfall. | [Code](chapter.qmd#L1785) |
+| Table 5.20 | The 99.9% Gaussian Credit VaR calculation. | [Code](chapter.qmd#L1815) |
+| Figure 5.11 | Systematic factor and conditional portfolio loss. | [Code](chapter.qmd#L1836) |
+| Table 5.21 | Credit VaR model risk under Gaussian and t-copula assumptions. | [Code](chapter.qmd#L1963) |
+| Figure 5.12 | Loss-tail survival probabilities under Gaussian and t-copulas. | [Code](chapter.qmd#L2009) |
+| Table 5.22 | Monte Carlo precision of the 99.9% expected-shortfall comparison, in USD millions. | [Code](chapter.qmd#L2050) |

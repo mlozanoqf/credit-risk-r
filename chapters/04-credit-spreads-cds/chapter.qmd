@@ -702,6 +702,12 @@ companion_kable(
 )
 ```
 
+The schedule entries are per unit of notional, while `hull_cds_components()`
+returns premium coefficients and a protection value already scaled by notional.
+Multiplying the total premium coefficient by the spread gives the premium value.
+The fair spread is protection value divided by that coefficient; the common
+notional scale cancels.
+
 ### An optional connection to default intensity
 
 ```{r cds-midpoint-core-display}

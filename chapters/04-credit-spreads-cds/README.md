@@ -1,10 +1,15 @@
 # Credit Spreads and CDS Valuation
 
-From the project root:
+First use? Complete the [setup walkthrough](../../README.md#first-time-prepare-your-computer).
+Open `credit-risk-r.Rproj` and run these commands in the RStudio **Console**:
 
-```sh
-Rscript run.R 04-credit-spreads-cds
+```r
+source("start.R")
+start_chapter("04-credit-spreads-cds")
 ```
+
+After **Complete:** appears, the browser opens `output/04-credit-spreads-cds/chapter.html`.
+If it stays closed, open that file manually from the extracted project folder.
 
 Open [chapter.qmd](chapter.qmd) to read or edit the code. The command above runs the
 complete chapter in a new R session. Run setup and preceding calculations before
@@ -31,22 +36,22 @@ for where to find the files created on your computer.
 | Table 4.12 | Present value of expected protection payoff for a $1 notional. | [Code](chapter.qmd#L643) |
 | Table 4.13 | Present value of expected accrued premium for a $1 notional. | [Code](chapter.qmd#L670) |
 | Table 4.14 | Fair CDS spread including accrued premium, for a $1 notional. | [Code](chapter.qmd#L698) |
-| Table 4.15 | Refining default timing while retaining annual CDS premiums. | [Code](chapter.qmd#L730) |
-| Table 4.16 | Mark-to-market value of an existing CDS. | [Code](chapter.qmd#L788) |
-| Table 4.17 | Implied hazard rate from a CDS spread. | [Code](chapter.qmd#L835) |
-| Table 4.18 | Quick CDS spread approximation compared with the accrued-premium valuation. | [Code](chapter.qmd#L884) |
-| Figure 4.3 | Fair CDS spread under hazard and recovery assumptions. | [Code](chapter.qmd#L938) |
-| Figure 4.4 | Mark-to-market value to the protection seller as the contractual spread changes. | [Code](chapter.qmd#L969) |
-| Table 4.19 | Protection-seller value sensitivity to the contractual CDS premium. | [Code](chapter.qmd#L1014) |
-| Table 4.20 | CDS valuation tools and the credit questions they answer. | [Code](chapter.qmd#L1023) |
-| Table 4.21 | Two corporate bonds considered for purchase; prices per 100 of principal. | [Code](chapter.qmd#L1076) |
-| Figure 4.5 | Settlement-adjusted Treasury zero yields used to discount the corporate-bond payments. | [Code](chapter.qmd#L1112) |
-| Table 4.22 | Issuer-specific pricing curves and model values for the bonds excluded from calibration. | [Code](chapter.qmd#L1145) |
-| Table 4.23 | Price and yield comparisons using the same promised payments for each bond. | [Code](chapter.qmd#L1173) |
-| Figure 4.6 | Additional promised yield relative to each bond's issuer-curve benchmark. | [Code](chapter.qmd#L1193) |
-| Table 4.24 | CCO minus Verizon yield-residual advantage under deterministic sensitivity checks. | [Code](chapter.qmd#L1256) |
-| Figure 4.7 | How a deduction from CCO's model value changes the conditional purchase preference. | [Code](chapter.qmd#L1299) |
-| Table 4.25 | First two and last two promised payments of the Brazilian sovereign bond, per 100 of principal. | [Code](chapter.qmd#L1343) |
-| Table 4.26 | Recovery sensitivity for the Brazilian bond. Fitted PDs hold the observed bond price fixed; the last column holds annual PD fixed. | [Code](chapter.qmd#L1412) |
-| Figure 4.8 | Cumulative default probability implied by the Brazilian bond price under different recovery assumptions. | [Code](chapter.qmd#L1441) |
-| Table 4.27 | Credit-spread and CDS valuation checklist. | [Code](chapter.qmd#L1495) |
+| Table 4.15 | Refining default timing while retaining annual CDS premiums. | [Code](chapter.qmd#L736) |
+| Table 4.16 | Mark-to-market value of an existing CDS. | [Code](chapter.qmd#L794) |
+| Table 4.17 | Implied hazard rate from a CDS spread. | [Code](chapter.qmd#L841) |
+| Table 4.18 | Quick CDS spread approximation compared with the accrued-premium valuation. | [Code](chapter.qmd#L890) |
+| Figure 4.3 | Fair CDS spread under hazard and recovery assumptions. | [Code](chapter.qmd#L944) |
+| Figure 4.4 | Mark-to-market value to the protection seller as the contractual spread changes. | [Code](chapter.qmd#L975) |
+| Table 4.19 | Protection-seller value sensitivity to the contractual CDS premium. | [Code](chapter.qmd#L1020) |
+| Table 4.20 | CDS valuation tools and the credit questions they answer. | [Code](chapter.qmd#L1029) |
+| Table 4.21 | Two corporate bonds considered for purchase; prices per 100 of principal. | [Code](chapter.qmd#L1082) |
+| Figure 4.5 | Settlement-adjusted Treasury zero yields used to discount the corporate-bond payments. | [Code](chapter.qmd#L1118) |
+| Table 4.22 | Issuer-specific pricing curves and model values for the bonds excluded from calibration. | [Code](chapter.qmd#L1151) |
+| Table 4.23 | Price and yield comparisons using the same promised payments for each bond. | [Code](chapter.qmd#L1179) |
+| Figure 4.6 | Additional promised yield relative to each bond's issuer-curve benchmark. | [Code](chapter.qmd#L1199) |
+| Table 4.24 | CCO minus Verizon yield-residual advantage under deterministic sensitivity checks. | [Code](chapter.qmd#L1262) |
+| Figure 4.7 | How a deduction from CCO's model value changes the conditional purchase preference. | [Code](chapter.qmd#L1305) |
+| Table 4.25 | First two and last two promised payments of the Brazilian sovereign bond, per 100 of principal. | [Code](chapter.qmd#L1349) |
+| Table 4.26 | Recovery sensitivity for the Brazilian bond. Fitted PDs hold the observed bond price fixed; the last column holds annual PD fixed. | [Code](chapter.qmd#L1418) |
+| Figure 4.8 | Cumulative default probability implied by the Brazilian bond price under different recovery assumptions. | [Code](chapter.qmd#L1447) |
+| Table 4.27 | Credit-spread and CDS valuation checklist. | [Code](chapter.qmd#L1501) |
