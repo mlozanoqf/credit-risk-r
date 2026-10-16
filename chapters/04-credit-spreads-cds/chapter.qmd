@@ -49,162 +49,20 @@ fmt_price <- function(x, digits = 3) {
 }
 ```
 
+```{r cashflow-core-setup, include=FALSE, cache=FALSE}
+source("chapters/04-credit-spreads-cds/helpers/cashflows.R")
+```
+
 ```{r step-004}
-discount_factor <- function(r, t) {
-  1 / (1 + r)^t
-}
-
-survival_schedule <- function(h) {
-  h <- as.numeric(h)
-  n <- length(h)
-  survival_start <- c(1, cumprod(1 - h)[-n])
-  marginal_pd <- survival_start * h
-  survival_end <- survival_start - marginal_pd
-  data.frame(
-    period = seq_len(n),
-    h = h,
-    survival_start = survival_start,
-    marginal_pd = marginal_pd,
-    survival_end = survival_end,
-    cumulative_pd = 1 - survival_end
-  )
-}
-
-price_zero_defaultable <- function(face, r, recovery, h) {
-  sched <- survival_schedule(h)
-  maturity <- length(h)
-  recovery_leg <- sum(discount_factor(r, sched$period) * recovery * face * sched$marginal_pd)
-  survival_leg <- discount_factor(r, maturity) * face * sched$survival_end[maturity]
-  recovery_leg + survival_leg
-}
-
-price_coupon_defaultable <- function(face, coupon_rate, r, recovery, h) {
-  sched <- survival_schedule(h)
-  maturity <- length(h)
-  coupon <- face * coupon_rate
-  coupon_leg <- sum(discount_factor(r, sched$period) * coupon * sched$survival_end)
-  recovery_leg <- sum(discount_factor(r, sched$period) * recovery * face * sched$marginal_pd)
-  principal_leg <- discount_factor(r, maturity) * face * sched$survival_end[maturity]
-  coupon_leg + recovery_leg + principal_leg
-}
-
-price_coupon_components <- function(face, coupon_rate, r, recovery, h) {
-  sched <- survival_schedule(h)
-  maturity <- length(h)
-  coupon <- face * coupon_rate
-  coupon_leg <- sum(discount_factor(r, sched$period) * coupon * sched$survival_end)
-  recovery_leg <- sum(discount_factor(r, sched$period) * recovery * face * sched$marginal_pd)
-  principal_leg <- discount_factor(r, maturity) * face * sched$survival_end[maturity]
-  data.frame(
-    component = c("Survival-weighted coupons", "Expected recovery", "Survival-weighted principal"),
-    present_value = c(coupon_leg, recovery_leg, principal_leg)
-  )
-}
-
-price_coupon_from_yield <- function(face, coupon_rate, yield, maturity) {
-  coupon <- face * coupon_rate
-  periods <- seq_len(maturity)
-  sum(discount_factor(yield, periods) * coupon) +
-    discount_factor(yield, maturity) * face
-}
+#| ref.label: [core-discount_factor, core-survival_schedule, core-price_zero_defaultable, core-price_coupon_defaultable, core-price_coupon_components, core-price_coupon_from_yield]
 ```
 
 ```{r step-005}
-price_coupon_risk_free <- function(face, coupon_rate, r, maturity) {
-  price_coupon_from_yield(face, coupon_rate, r, maturity)
-}
+#| ref.label: [core-price_coupon_risk_free]
 ```
 
 ```{r step-006}
-coupon_bond_ytm <- function(price, face, coupon_rate, maturity) {
-  f <- function(y) {
-    price_coupon_from_yield(face, coupon_rate, y, maturity) - price
-  }
-  uniroot(f, interval = c(-0.95, 1), tol = 1e-12)$root
-}
-
-solve_flat_hazard_from_price <- function(price, face, coupon_rate, r, recovery, maturity) {
-  f <- function(h) {
-    price_coupon_defaultable(
-      face = face,
-      coupon_rate = coupon_rate,
-      r = r,
-      recovery = recovery,
-      h = rep(h, maturity)
-    ) - price
-  }
-  uniroot(f, interval = c(1e-8, 0.95), tol = 1e-12)$root
-}
-
-cds_legs <- function(notional, r, recovery, h, spread) {
-  sched <- survival_schedule(h)
-  discount <- discount_factor(r, sched$period)
-  protection_leg <- notional * (1 - recovery) *
-    sum(discount * sched$marginal_pd)
-  premium_leg <- notional * spread *
-    sum(discount * sched$survival_end)
-  data.frame(
-    protection_leg = protection_leg,
-    premium_leg = premium_leg,
-    cds_value_to_protection_buyer = protection_leg - premium_leg
-  )
-}
-
-cds_fair_spread <- function(r, recovery, h) {
-  sched <- survival_schedule(h)
-  discount <- discount_factor(r, sched$period)
-  (1 - recovery) * sum(discount * sched$marginal_pd) /
-    sum(discount * sched$survival_end)
-}
-
-hull_cds_schedule <- function(hazard_rate, r, recovery, maturity) {
-  year <- seq_len(maturity)
-  survival_start <- exp(-hazard_rate * (year - 1))
-  survival_end <- exp(-hazard_rate * year)
-  default_probability <- survival_start - survival_end
-  premium_discount <- exp(-r * year)
-  default_time <- year - 0.5
-  default_discount <- exp(-r * default_time)
-  data.frame(
-    year = year,
-    survival_probability = survival_end,
-    default_probability = default_probability,
-    premium_discount = premium_discount,
-    default_time = default_time,
-    default_discount = default_discount,
-    premium_annuity_piece = survival_end * premium_discount,
-    protection_piece = default_probability * (1 - recovery) * default_discount,
-    accrual_annuity_piece = 0.5 * default_probability * default_discount
-  )
-}
-
-hull_cds_components <- function(hazard_rate, r, recovery, maturity, notional = 1) {
-  sched <- hull_cds_schedule(hazard_rate, r, recovery, maturity)
-  premium_annuity <- notional * sum(sched$premium_annuity_piece)
-  protection_leg <- notional * sum(sched$protection_piece)
-  accrual_annuity <- notional * sum(sched$accrual_annuity_piece)
-  fair_spread <- protection_leg / (premium_annuity + accrual_annuity)
-  list(
-    schedule = sched,
-    premium_annuity = premium_annuity,
-    protection_leg = protection_leg,
-    accrual_annuity = accrual_annuity,
-    risky_annuity_with_accrual = premium_annuity + accrual_annuity,
-    fair_spread = fair_spread
-  )
-}
-
-solve_hull_hazard_from_spread <- function(spread, r, recovery, maturity) {
-  f <- function(hazard_rate) {
-    hull_cds_components(
-      hazard_rate = hazard_rate,
-      r = r,
-      recovery = recovery,
-      maturity = maturity
-    )$fair_spread - spread
-  }
-  uniroot(f, interval = c(1e-8, 1), tol = 1e-12)$root
-}
+#| ref.label: [core-coupon_bond_ytm, core-solve_flat_hazard_from_price, core-cds_legs, core-cds_fair_spread, core-hull_cds_schedule, core-hull_cds_components, core-solve_hull_hazard_from_spread]
 ```
 
 ### Table 4.1 {#result-table-4-1}
@@ -231,22 +89,7 @@ companion_kable(merton_bridge_table, caption = "Merton quantities carried into t
 ## 4.1 Default timing in discrete time
 
 ```{r step-008}
-survival_schedule <- function(h) {
-  h <- as.numeric(h)
-  n <- length(h)
-  survival_start <- c(1, cumprod(1 - h)[-n])
-  marginal_pd <- survival_start * h
-  survival_end <- survival_start - marginal_pd
-
-  data.frame(
-    period = seq_len(n),
-    h = h,
-    survival_start = survival_start,
-    marginal_pd = marginal_pd,
-    survival_end = survival_end,
-    cumulative_pd = 1 - survival_end
-  )
-}
+#| ref.label: [core-survival_schedule]
 ```
 
 ```{r step-009}
@@ -302,20 +145,7 @@ companion_kable(
 ## 4.2 A risky zero-coupon bond
 
 ```{r step-013}
-discount_factor <- function(r, t) {
-  1 / (1 + r)^t
-}
-
-price_zero_defaultable <- function(face, r, recovery, h) {
-  sched <- survival_schedule(h)
-  maturity <- length(h)
-  recovery_leg <- sum(
-    discount_factor(r, sched$period) * recovery * face * sched$marginal_pd
-  )
-  survival_leg <- discount_factor(r, maturity) *
-    face * sched$survival_end[maturity]
-  recovery_leg + survival_leg
-}
+#| ref.label: [core-discount_factor, core-price_zero_defaultable]
 ```
 
 ```{r step-014}
@@ -357,32 +187,7 @@ companion_kable(zero_table, caption = "Risk-free and risky zero-coupon valuation
 ## 4.3 A risky coupon bond
 
 ```{r step-016}
-price_coupon_defaultable <- function(face, coupon_rate, r, recovery, h) {
-  sched <- survival_schedule(h)
-  maturity <- length(h)
-  coupon <- face * coupon_rate
-  coupon_leg <- sum(discount_factor(r, sched$period) * coupon * sched$survival_end)
-  recovery_leg <- sum(
-    discount_factor(r, sched$period) * recovery * face * sched$marginal_pd
-  )
-  principal_leg <- discount_factor(r, maturity) *
-    face * sched$survival_end[maturity]
-  coupon_leg + recovery_leg + principal_leg
-}
-
-price_coupon_from_yield <- function(face, coupon_rate, yield, maturity) {
-  coupon <- face * coupon_rate
-  periods <- seq_len(maturity)
-  sum(coupon / (1 + yield)^periods) +
-    face / (1 + yield)^maturity
-}
-
-coupon_bond_ytm <- function(price, face, coupon_rate, maturity) {
-  f <- function(y) {
-    price_coupon_from_yield(face, coupon_rate, y, maturity) - price
-  }
-  uniroot(f, interval = c(-0.95, 1), tol = 1e-12)$root
-}
+#| ref.label: [core-price_coupon_components, core-price_coupon_defaultable, core-price_coupon_from_yield, core-coupon_bond_ytm]
 ```
 
 ```{r step-017}
@@ -435,26 +240,7 @@ companion_kable(coupon_table, caption = "Risk-free and risky coupon bond valuati
 ```
 
 ```{r step-019}
-price_coupon_components <- function(face, coupon_rate, r, recovery, h) {
-  sched <- survival_schedule(h)
-  maturity <- length(h)
-  coupon <- face * coupon_rate
-  coupon_leg <- sum(discount_factor(r, sched$period) * coupon * sched$survival_end)
-  recovery_leg <- sum(
-    discount_factor(r, sched$period) * recovery * face * sched$marginal_pd
-  )
-  principal_leg <- discount_factor(r, maturity) *
-    face * sched$survival_end[maturity]
-
-  data.frame(
-    component = c(
-      "Survival-weighted coupons",
-      "Expected recovery",
-      "Survival-weighted principal"
-    ),
-    present_value = c(coupon_leg, recovery_leg, principal_leg)
-  )
-}
+#| ref.label: [core-price_coupon_components]
 ```
 
 ```{r step-020}
@@ -594,7 +380,7 @@ credit_spread_bond_checkpoint <- data.frame(
 
 companion_kable(
   credit_spread_bond_checkpoint,
-  caption = "Checkpoint after the risky bond valuation block.",
+  caption = "Default probabilities, recovery, and their roles in bond valuation.",
   escape = FALSE,
   row.names = FALSE
 )
@@ -656,27 +442,7 @@ companion_kable(pd_spread_example_table, caption = "Historical PDs and spread-im
 ## 4.5 CDS valuation in annual periods
 
 ```{r step-028}
-cds_legs <- function(notional, r, recovery, h, spread) {
-  sched <- survival_schedule(h)
-  discount <- discount_factor(r, sched$period)
-  protection_leg <- notional * (1 - recovery) *
-    sum(discount * sched$marginal_pd)
-  premium_leg <- notional * spread *
-    sum(discount * sched$survival_end)
-
-  data.frame(
-    protection_leg = protection_leg,
-    premium_leg = premium_leg,
-    cds_value_to_protection_buyer = protection_leg - premium_leg
-  )
-}
-
-cds_fair_spread <- function(r, recovery, h) {
-  sched <- survival_schedule(h)
-  discount <- discount_factor(r, sched$period)
-  (1 - recovery) * sum(discount * sched$marginal_pd) /
-    sum(discount * sched$survival_end)
-}
+#| ref.label: [core-cds_legs, core-cds_fair_spread]
 ```
 
 ### Using the Merton PD to price protection
@@ -765,7 +531,7 @@ plot_fig_cds_leg_crossing <- ggplot(cds_crossing, aes(x = spread)) +
 ```{r figure-4-2}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 4.2. CDS premium leg and protection leg as the spread changes."
+#| fig-cap: "Figure 4.2. Present values of the CDS premium and protection legs across spreads."
 plot_fig_cds_leg_crossing +
   geom_vline(xintercept = merton_cds_spread, linetype = "dashed", linewidth = 0.8, color = "#222222") +
   annotate("text", x = merton_cds_spread + 0.065, y = merton_cds_legs$protection_leg * 0.55,
@@ -781,44 +547,7 @@ plot_fig_cds_leg_crossing +
 ## 4.6 CDS valuation with accrued premium
 
 ```{r step-035}
-hull_cds_schedule <- function(hazard_rate, r, recovery, maturity) {
-  year <- seq_len(maturity)
-  survival_start <- exp(-hazard_rate * (year - 1))
-  survival_end <- exp(-hazard_rate * year)
-  default_probability <- survival_start - survival_end
-  premium_discount <- exp(-r * year)
-  default_discount <- exp(-r * (year - 0.5))
-
-  data.frame(
-    year = year,
-    default_time = year - 0.5,
-    survival_probability = survival_end,
-    default_probability = default_probability,
-    premium_discount = premium_discount,
-    default_discount = default_discount,
-    premium_annuity_piece = survival_end * premium_discount,
-    protection_piece = default_probability * (1 - recovery) * default_discount,
-    accrual_annuity_piece = 0.5 * default_probability * default_discount
-  )
-}
-
-hull_cds_components <- function(hazard_rate, r, recovery, maturity,
-                                notional = 1) {
-  sched <- hull_cds_schedule(hazard_rate, r, recovery, maturity)
-  premium_annuity <- notional * sum(sched$premium_annuity_piece)
-  protection_leg <- notional * sum(sched$protection_piece)
-  accrual_annuity <- notional * sum(sched$accrual_annuity_piece)
-  fair_spread <- protection_leg / (premium_annuity + accrual_annuity)
-
-  list(
-    schedule = sched,
-    premium_annuity = premium_annuity,
-    protection_leg = protection_leg,
-    accrual_annuity = accrual_annuity,
-    risky_annuity_with_accrual = premium_annuity + accrual_annuity,
-    fair_spread = fair_spread
-  )
-}
+#| ref.label: [core-hull_cds_schedule, core-hull_cds_components]
 ```
 
 ```{r step-036}
@@ -969,27 +698,27 @@ hull_summary <- data.frame(
 ```{r table-4-14}
 companion_kable(
   hull_summary,
-  caption = "Fair CDS spread from premium, accrual, and protection legs for a $1 notional."
+  caption = "Fair CDS spread including accrued premium, for a $1 notional."
 )
 ```
 
 ### An optional connection to default intensity
 
+```{r cds-midpoint-core-display}
+#| ref.label: core-cds_midpoint
+```
+
 ```{r step-047}
 cds_timing_grid <- function(intervals_per_year) {
   dt <- 1 / intervals_per_year
-  ends <- seq(dt, hull_maturity, by = dt)
-  mids <- ends - dt / 2
-  default_mass <- exp(-hull_hazard * (ends - dt)) -
-    exp(-hull_hazard * ends)
-  discounted_mass <- default_mass * exp(-hull_r * mids)
-  protection <- (1 - hull_recovery) * sum(discounted_mass)
-  accrual <- sum((mids - floor(mids)) * discounted_mass)
+  value <- cds_midpoint(hull_hazard, hull_r, hull_recovery, hull_maturity,
+    intervals_per_year, premium_annuity = hull_components$premium_annuity,
+    ends = seq(dt, hull_maturity, by = dt))
   data.frame(
     intervals = intervals_per_year,
     interval_pd = -expm1(-hull_hazard * dt),
     survival = exp(-hull_hazard * hull_maturity),
-    spread = protection / (hull_components$premium_annuity + accrual)
+    spread = value$spread
   )
 }
 cds_timing_results <- do.call(rbind,
@@ -1008,18 +737,17 @@ companion_kable(data.frame(
 ), caption = "Refining default timing while retaining annual CDS premiums.")
 ```
 
+```{r cds-continuous-core-display}
+#| ref.label: [core-cds_discounted_default_density, core-cds_continuous]
+```
+
 ```{r step-049}
-cds_discounted_density <- function(t) {
-  hull_hazard * exp(-(hull_hazard + hull_r) * t)
-}
-cds_exact_protection <- (1 - hull_recovery) *
-  integrate(cds_discounted_density, 0, hull_maturity)$value
-cds_exact_accrual <- sum(vapply(seq_len(hull_maturity), function(k) {
-  integrate(function(t) (t - k + 1) * cds_discounted_density(t),
-    k - 1, k)$value
-}, numeric(1)))
-cds_exact_spread <- cds_exact_protection /
-  (hull_components$premium_annuity + cds_exact_accrual)
+cds_exact <- cds_continuous(hull_hazard, hull_r, hull_recovery,
+  hull_maturity, rel.tol = .Machine$double.eps^0.25,
+  premium_annuity = hull_components$premium_annuity)
+cds_exact_protection <- cds_exact$L
+cds_exact_accrual <- cds_exact$C
+cds_exact_spread <- cds_exact$spread
 cds_exact_spread * 10000
 ```
 
@@ -1065,17 +793,7 @@ companion_kable(
 ```
 
 ```{r step-053}
-solve_hull_hazard_from_spread <- function(spread, r, recovery, maturity) {
-  f <- function(hazard_rate) {
-    hull_cds_components(
-      hazard_rate = hazard_rate,
-      r = r,
-      recovery = recovery,
-      maturity = maturity
-    )$fair_spread - spread
-  }
-  uniroot(f, interval = c(1e-8, 1), tol = 1e-12)$root
-}
+#| ref.label: [core-solve_hull_hazard_from_spread]
 ```
 
 ```{r step-054}
@@ -1296,7 +1014,7 @@ hull_premium_sensitivity_table <- data.frame(
 ```{r table-4-19}
 companion_kable(
   hull_premium_sensitivity_table,
-  caption = "Value sensitivity to the contractual premium."
+  caption = "Protection-seller value sensitivity to the contractual CDS premium."
 )
 ```
 
@@ -1333,7 +1051,7 @@ cds_toolkit_checkpoint <- data.frame(
 
 companion_kable(
   cds_toolkit_checkpoint,
-  caption = "Checkpoint after the accrued-premium CDS valuation block.",
+  caption = "CDS valuation tools and the credit questions they answer.",
   row.names = FALSE
 )
 ```
@@ -1431,7 +1149,7 @@ companion_kable(data.frame(
   `Year 1 PD` = vapply(rv_results, function(x) fmt_pct(x$h[1], 3), character(1)),
   `Year 8 PD` = vapply(rv_results, function(x) fmt_pct(x$h[2], 3), character(1)),
   `Model price` = vapply(rv_results, function(x) fmt_price(x$model_price, 4), character(1)),
-  check.names = FALSE), caption = "Issuer-specific pricing curves and out-of-calibration target values.")
+  check.names = FALSE), caption = "Issuer-specific pricing curves and model values for the bonds excluded from calibration.")
 ```
 
 ## 4.8 Which bond offers the stronger relative value?
@@ -1723,7 +1441,7 @@ plot_brazil_recovery <- ggplot(brazil_curve,
 ```{r figure-4-8}
 #| fig-width: 5.5
 #| fig-height: 3.8
-#| fig-cap: "Figure 4.8. Default probability by maturity implied by the same Brazilian bond price under different recovery assumptions."
+#| fig-cap: "Figure 4.8. Cumulative default probability implied by the Brazilian bond price under different recovery assumptions."
 plot_brazil_recovery +
   scale_x_continuous(labels = scales::label_percent(accuracy = 1),
                      breaks = seq(0.20, 0.60, 0.10)) +

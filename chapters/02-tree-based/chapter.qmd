@@ -1604,7 +1604,7 @@ xgb_gain_plot <- xgb_importance |>
 ```{r figure-2-6}
 #| fig-width: 5.5
 #| fig-height: 4.5
-#| fig-cap: "Figure 2.6. XGBoost feature importance."
+#| fig-cap: "Figure 2.6. XGBoost feature importance by Gain."
 xgb_gain_plot +
   labs(x = "Gain", y = "Feature") +
   book_figure_theme()
@@ -1644,7 +1644,7 @@ xgb_shap_plot <- xgb_shap_importance |>
 ```{r figure-2-7}
 #| fig-width: 5.5
 #| fig-height: 4.5
-#| fig-cap: "Figure 2.7. Average absolute XGBoost contribution by feature."
+#| fig-cap: "Figure 2.7. Average absolute contribution to the XGBoost log-odds score by feature."
 xgb_shap_plot +
   labs(x = "Mean absolute contribution", y = "Feature") +
   book_figure_theme()
@@ -1752,7 +1752,7 @@ john_xgb_contribution_table <- data.frame(
 john_xgb_contribution_table |>
   mutate(contribution = fmt_num(contribution, 4)) |>
   companion_kable(
-    caption = "Largest local XGBoost contributions for John Doe.",
+    caption = "Largest local contributions to John Doe's XGBoost log-odds score.",
     row.names = FALSE
   )
 ```
@@ -1818,38 +1818,27 @@ pd_age_max_pd <- max(pd_age$average_predicted_pd)
 
 ## 2.7 Benchmarking against logistic regression
 
+```{r shared-scoring-load}
+source("shared/scoring.R")
+```
+
+```{r shared-scoring-definitions}
+#| eval: false
+#| code: !expr 'c("credit_policy_curve <-", deparse(credit_policy_curve, width.cutoff = 70), "", "credit_calibration_table <-", deparse(credit_calibration_table, width.cutoff = 70))'
+```
+
 ```{r step-057}
+source("shared/scoring.R")
 strategy_curve <- function(model_name, prob_of_default,
-                           acceptance_grid = seq(0.50, 0.95, 0.05),
+                           acceptance_grid = seq(.50, .95, .05),
                            good_loan_payoff = 1, bad_loan_cost = 5) {
-  do.call(rbind, lapply(acceptance_grid, function(accept_rate) {
-    cutoff <- unname(quantile(prob_of_default, accept_rate))
-    accept <- prob_of_default <= cutoff
-    accepted <- sum(accept)
-    accepted_good <- sum(actual_default_tree[accept] == 0)
-    accepted_defaults <- sum(actual_default_tree[accept] == 1)
-    data.frame(
-      model = model_name, accept_rate = accept_rate,
-      actual_accept_rate = accepted / length(actual_default_tree),
-      cutoff = cutoff, accepted = accepted,
-      accepted_good = accepted_good, accepted_defaults = accepted_defaults,
-      bad_rate = accepted_defaults / accepted,
-      net_payoff = accepted_good * good_loan_payoff - accepted_defaults * bad_loan_cost
-    )
-  }))
+  credit_policy_curve(actual_default_tree, model_name, prob_of_default,
+                      acceptance_grid, good_loan_payoff, bad_loan_cost)
 }
 
 calibration_table <- function(model_name, prob_of_default, groups = 10) {
-  data.frame(model = model_name, application_row = as.integer(rownames(test)),
-             observed_default = actual_default_tree, predicted_pd = prob_of_default) |>
-    arrange(model, predicted_pd, application_row) |>
-    group_by(model) |>
-    mutate(risk_decile = ntile(predicted_pd, groups)) |>
-    group_by(model, risk_decile) |>
-    summarize(applications = n(), average_predicted_pd = mean(predicted_pd),
-              observed_default_rate = mean(observed_default),
-              brier_score = mean((predicted_pd - observed_default)^2),
-              .groups = "drop")
+  credit_calibration_table(actual_default_tree, as.integer(rownames(test)),
+                           model_name, prob_of_default, groups)
 }
 
 constant_default_rate <- rep(mean(actual_default_tree), length(actual_default_tree))
@@ -2078,7 +2067,7 @@ tree_bad_rate_plot <- strategy_comparison |>
 ```{r figure-2-11}
 #| fig-width: 5.5
 #| fig-height: 4.3
-#| fig-cap: "Figure 2.11. Bad rate by acceptance rate: logistic regression, single tree, and XGBoost."
+#| fig-cap: "Figure 2.11. Bad rate by target acceptance rate: logistic regression, single tree, and XGBoost."
 tree_bad_rate_plot +
   scale_color_manual(values = book_tree_colors, labels = book_tree_labels) +
   scale_linetype_manual(values = c(logi_full = "solid", single_tree = "dotted", xgboost = "dashed"),
@@ -2107,7 +2096,7 @@ tree_payoff_plot <- strategy_comparison |>
 ```{r figure-2-12}
 #| fig-width: 5.5
 #| fig-height: 4.3
-#| fig-cap: "Figure 2.12. Net payoff by acceptance rate: logistic regression, single tree, and XGBoost."
+#| fig-cap: "Figure 2.12. Net payoff by target acceptance rate: logistic regression, single tree, and XGBoost."
 tree_payoff_plot +
   geom_segment(
     data = best_strategy_points,

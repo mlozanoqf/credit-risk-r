@@ -570,7 +570,7 @@ plot_fig_climate_physical_risk_local <- ggplot(daps_summary, aes(x = max_pd_adju
 ```{r figure-6-1}
 #| fig-width: 5.5
 #| fig-height: 5.4
-#| fig-cap: "Figure 6.1. Regional physical-risk PD adjustments in selected CLIMACRED DAPS runs."
+#| fig-cap: "Figure 6.1. Maximum regional physical-risk PD adjustments over 2024-2030 in selected CLIMACRED DAPS runs."
 plot_fig_climate_physical_risk_local +
   scale_fill_manual(values = c(Agriculture = "#009E73", Coal = "#B22222", `Power Supply` = "#0072B2")) +
   labs(x = "Maximum PD adjustment during 2024-2030 (percentage points)", y = NULL, fill = NULL,
@@ -738,7 +738,7 @@ portfolio_horizon_loss |>
     `Relative change` = fmt_pct(increase, 1)
   ) |>
   companion_kable(
-    caption = "Five-year portfolio expected loss with and without the CLIMACRED climate adjustment."
+    caption = "Present value of five-year portfolio expected loss with and without the CLIMACRED climate adjustment."
   )
 ```
 
@@ -765,7 +765,7 @@ plot_fig_climate_pv_expected_loss <- ggplot(mutate(tidyr::pivot_longer(portfolio
 ```{r figure-6-2}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 6.2. Portfolio expected loss with and without CLIMACRED climate adjustments."
+#| fig-cap: "Figure 6.2. Present value of five-year portfolio expected loss with and without CLIMACRED climate adjustments."
 plot_fig_climate_pv_expected_loss +
   geom_text(aes(label = paste0("$", fmt_num(pv_expected_loss/1e+06, 1), "m")), position = position_dodge(width = 0.7),
     vjust = -0.35, size = 3.4) +
@@ -790,7 +790,7 @@ plot_fig_climate_sector_contribution <- ggplot(horizon_loss, aes(x = incremental
 ```{r figure-6-3}
 #| fig-width: 5.5
 #| fig-height: 5.4
-#| fig-cap: "Figure 6.3. Sector contributions to incremental climate expected loss."
+#| fig-cap: "Figure 6.3. Sector contributions to the climate-related change in five-year discounted expected loss."
 plot_fig_climate_sector_contribution +
   scale_fill_manual(values = book_palette[names(book_palette) != "Baseline"]) +
   guides(fill = guide_legend(ncol = 1)) +
@@ -1143,7 +1143,7 @@ plot_fig_climate_loss_simulation <- ggplot(simulated_losses, aes(x = loss/1e+06,
 ```{r figure-6-7}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 6.7. Baseline and climate-adjusted portfolio loss distributions under Highway to Paris."
+#| fig-cap: "Figure 6.7. Baseline and climate-adjusted one-year portfolio loss distributions in 2030 under Highway to Paris."
 plot_fig_climate_loss_simulation +
   geom_vline(data = loss_summary, aes(xintercept = var_95/1e+06, color = case), linetype = "dashed",
     linewidth = 0.8) +

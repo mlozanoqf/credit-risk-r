@@ -124,6 +124,16 @@ the chapters before verification. A deliberate extension may change the numerica
 references; investigate those differences before updating the references. See
 [verification details](checks/README.md) for the scope of these checks.
 
+## Instructor solutions
+
+The separate instructor manual uses this complete repository together with a
+restricted instructor code package. Its solutions load the same frozen inputs
+and shared computational functions used by the book, then add exercise-specific
+calculations. Follow the instructor package README to select the compatible
+companion revision, restore its R environment, and run each chapter of solutions.
+Running `run.R` in this repository produces the book results; the instructor
+package has its own runner for the exercises. Access to that package is separate.
+
 ## Licensing and availability
 
 The author-supplied analysis code is licensed under GPL-3.0; see [LICENSE](LICENSE).

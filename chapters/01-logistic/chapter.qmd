@@ -197,7 +197,7 @@ cleaned_income_dotplot <- ggplot(dat, aes(income)) +
 ```{r figure-1-3}
 #| fig-width: 5.5
 #| fig-height: 3.6
-#| fig-cap: "Figure 1.3. Annual income without extreme values."
+#| fig-cap: "Figure 1.3. Annual income after excluding values above $1,000,000."
 cleaned_income_dotplot +
   scale_x_continuous(labels = scales::label_comma()) +
   scale_y_continuous(breaks = NULL) +
@@ -1963,7 +1963,7 @@ results_df |>
     Specificity = fmt_pct(Specificity, 1)
   ) |>
   companion_kable(
-    caption = "Cutoffs and error rates implied by two acceptance policies.",
+    caption = "Cutoffs, sensitivity, and specificity under two acceptance policies.",
     col.names = c(
       "Model",
       "Bank policy",
@@ -2011,7 +2011,7 @@ roc_policy_plot <- ggplot(
 ```{r figure-1-18}
 #| fig-width: 5.5
 #| fig-height: 5.1
-#| fig-cap: "Figure 1.18. Full model in blue, evaluated at two acceptance rates: 65% in black, 80% in red."
+#| fig-cap: "Figure 1.18. Full-model ROC curve (blue) with 65% (black) and 80% (red) acceptance policies."
 roc_acceptance_labels <- data.frame(
   target = c("Acceptance rate of 80%", "Acceptance rate of 65%"),
   false_positive_rate = roc_acceptance_guides$false_positive_rate,

@@ -309,7 +309,7 @@ companion_kable(
     Credit_state_score = fmt_num(Credit_state_score, 2),
     Default_threshold = fmt_num(Default_threshold, 6)
   ),
-  caption = "Illustrative threshold rule for one simulated credit scenario.",
+  caption = "Illustrative threshold rule for one hypothetical credit scenario.",
   row.names = FALSE
 )
 ```
@@ -420,7 +420,7 @@ plot_fig_hull_247_threshold_check_zoom <- ggplot(threshold_curve_data, aes(x = x
 ```{r figure-5-4}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 5.4. Zoom: Gaussian thresholds and cumulative PDs between -2.5 and -0.5."
+#| fig-cap: "Figure 5.4. Zoom: Gaussian thresholds and cumulative PDs for credit-state scores between -2.5 and -0.5."
 plot_fig_hull_247_threshold_check_zoom +
   geom_hline(data = threshold_points, aes(yintercept = Cumulative_PD), linetype = "dotted",
     color = "#BBBBBB") +
@@ -1251,7 +1251,7 @@ plot_fig_concentration_risk_losses <- ggplot(concentration_hist_data, aes(x = x_
 ```{r figure-5-9}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 5.9. Same defaults and different exposure weights."
+#| fig-cap: "Figure 5.9. Portfolio loss distributions with the same defaults and different exposure weights."
 plot_fig_concentration_risk_losses +
   geom_vline(data = concentration_var_data, aes(xintercept = VaR), inherit.aes = FALSE,
     color = "#7B241C", linewidth = 1, linetype = "dashed") +

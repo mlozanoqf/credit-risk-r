@@ -39,6 +39,7 @@ knitr::opts_chunk$set(fig.width = 5.5, fig.height = 4)
 source("chapters/03-merton/helpers/packages.R")
 
 source("shared/formatting.R")
+source("chapters/03-merton/helpers/calibration.R")
 ```
 
 ### Inputs and Hull equations
@@ -58,54 +59,16 @@ D <- 10 # Promised debt payment due at maturity. The Bloomberg function DDIS is 
 ### Solving the two Merton equations
 
 ```{r step-005}
-start_V0 <- E0 + D * exp(-rf * TT)
-
-start_sv <- se * E0 / start_V0
-
-d1_merton <- function(V0, sv) {
-  (log(V0 / D) + (rf + sv^2 / 2) * TT) / (sv * sqrt(TT))
-}
-
-d2_merton <- function(V0, sv) {
-  d1_merton(V0, sv) - sv * sqrt(TT)
-}
-
-equity_value_error <- function(V0, sv) {
-  V0 * pnorm(d1_merton(V0, sv)) -
-    D * exp(-rf * TT) * pnorm(d2_merton(V0, sv)) -
-    E0
-}
-
-equity_volatility_error <- function(V0, sv) {
-  pnorm(d1_merton(V0, sv)) * sv * V0 - se * E0
-}
-
-merton_squared_error <- function(x)
-  (equity_value_error(x[1], x[2]))^2 + (equity_volatility_error(x[1], x[2]))^2
-
-V0_sv <- optim(
-  par = c(V0 = start_V0, sv = start_sv),
-  fn = merton_squared_error,
-  method = "L-BFGS-B",
-  lower = c(V0 = 1e-6, sv = 1e-6),
-  control = list(
-    parscale = c(V0 = 10, sv = 0.2),
-    ndeps = c(V0 = 1e-6, sv = 1e-8)
-  )
-)
-
-V0 <- unname(V0_sv$par["V0"])
-
-sv <- unname(V0_sv$par["sv"])
+#| ref.label: [core-merton_d1, core-merton_d2, core-merton_equity, core-merton_equity_volatility_value, core-merton_residuals, core-merton_objective, core-merton_calibrate, merton-calibration]
 ```
 
 ### From $d_2$ to the risk-neutral PD
 
 ```{r step-006}
-PD <- function(V0, sv) {
-  pnorm(-(((log(V0 / D) + (rf + sv^2 / 2) * TT) /
-             (sv * sqrt(TT))) - sv * sqrt(TT))) }
+#| ref.label: [core-merton_probability, merton-probability]
+```
 
+```{r merton-initial-pd}
 pd <- PD(V0, sv)
 ```
 
@@ -395,7 +358,7 @@ plot_fig_motfacv <- ggplot2::ggplot(contour_data, ggplot2::aes(x = asset_value, 
 ```{r figure-3-4}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.4. Minimization of the function: a contour view."
+#| fig-cap: "Figure 3.4. Merton objective function: a contour view."
 plot_fig_motfacv +
   ggplot2::geom_label(data = contour_label_data, ggplot2::aes(x = asset_value, y = asset_volatility,
     label = label), inherit.aes = FALSE, size = 4, label.size = 0, fill = "white", alpha = 0.85) +
@@ -413,7 +376,7 @@ plot_fig_motfacv +
 ```{r figure-3-5}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.5. Minimization of the function: a three-dimensional view."
+#| fig-cap: "Figure 3.5. Merton objective function: a three-dimensional view."
 if (TRUE) { # Static view matching the printed figure.
   saved_par <- par(mar = c(2.4, 2.4, 2.2, 1), mgp = c(1.7, 0.5, 0))
   persp(
@@ -971,7 +934,7 @@ plot_fig_ho1votaam <- ggplot2::ggplot(hist_data) +
 ```{r figure-3-12}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.12. Histogram of 100,000 values of the assets at maturity."
+#| fig-cap: "Figure 3.12. Histogram of 100,000 terminal asset values simulated under the risk-neutral measure."
 plot_fig_ho1votaam +
   ggplot2::geom_vline(xintercept = D, linetype = "dashed", linewidth = 0.35) +
   ggplot2::annotate("text", x = hist_label_x, y = hist_label_y, hjust = 0, vjust = 1, label = paste0("Red area = ",
@@ -1062,48 +1025,7 @@ source("chapters/03-merton/helpers/pd.R")
 ```
 
 ```{r step-063}
-pd <- function(E0, se, rf, TT, D) {
-  d1_merton <- function(V0, sv) {
-    (log(V0 / D) + (rf + sv^2 / 2) * TT) / (sv * sqrt(TT))
-  }
-
-  d2_merton <- function(V0, sv) {
-    d1_merton(V0, sv) - sv * sqrt(TT)
-  }
-
-  equity_value_error <- function(V0, sv) {
-    V0 * pnorm(d1_merton(V0, sv)) -
-      D * exp(-rf * TT) * pnorm(d2_merton(V0, sv)) -
-      E0
-  }
-
-  equity_volatility_error <- function(V0, sv) {
-    pnorm(d1_merton(V0, sv)) * sv * V0 - se * E0
-  }
-
-  objective <- function(x) {
-    equity_value_error(x[1], x[2])^2 + equity_volatility_error(x[1], x[2])^2
-  }
-
-  start_V0 <- E0 + D * exp(-rf * TT)
-  start_sv <- se * E0 / start_V0
-
-  solution <- optim(
-    par = c(V0 = start_V0, sv = start_sv),
-    fn = objective,
-    method = "L-BFGS-B",
-    lower = c(V0 = 1e-6, sv = 1e-6),
-    control = list(
-      parscale = c(V0 = 10, sv = 0.2),
-      ndeps = c(V0 = 1e-6, sv = 1e-8)
-    )
-  )
-
-  V0_hat <- unname(solution$par["V0"])
-  sv_hat <- unname(solution$par["sv"])
-
-  pnorm(-d2_merton(V0_hat, sv_hat))
-}
+#| ref.label: [core-merton_d1, core-merton_d2, core-merton_equity, core-merton_equity_volatility_value, core-merton_residuals, core-merton_objective, core-merton_calibrate, merton-pd-function]
 ```
 
 ```{r step-064}
@@ -1611,7 +1533,7 @@ scenario2_curve_data <- make_capital_structure_data(
 ```{r figure-3-23}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.23. Alternative starting balance sheet and Merton risk-neutral PD."
+#| fig-cap: "Figure 3.23. Alternative capital-structure position and Merton risk-neutral PD."
 plot_capital_structure(
   curve_data = scenario2_curve_data,
   color_values = scenario2_colors,
@@ -1641,7 +1563,7 @@ plot_capital_structure(
 ```{r figure-3-24}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.24. Debt reduction versus equity injection from the alternative balance sheet."
+#| fig-cap: "Figure 3.24. Debt reduction versus equity injection from the alternative capital-structure position."
 plot_capital_structure(
   curve_data = scenario2_curve_data,
   color_values = scenario2_colors,

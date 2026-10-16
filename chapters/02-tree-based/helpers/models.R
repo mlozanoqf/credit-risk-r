@@ -1,3 +1,4 @@
+source("shared/scoring.R")
 source("chapters/01-logistic/helpers/models.R")
 
 suppressPackageStartupMessages({
@@ -92,54 +93,15 @@ brier_score <- function(actual, predicted_probability) {
 }
 
 strategy_curve <- function(model_name, prob_of_default,
-                           acceptance_grid = seq(0.50, 0.95, 0.05),
-                           good_loan_payoff = 1,
-                           bad_loan_cost = 5) {
-  do.call(
-    rbind,
-    lapply(acceptance_grid, function(accept_rate) {
-      cutoff <- unname(quantile(prob_of_default, accept_rate))
-      accept <- prob_of_default <= cutoff
-      accepted <- sum(accept)
-      accepted_good <- sum(actual_default_tree[accept] == 0)
-      accepted_defaults <- sum(actual_default_tree[accept] == 1)
-      bad_rate <- accepted_defaults / accepted
-      net_payoff <- accepted_good * good_loan_payoff -
-        accepted_defaults * bad_loan_cost
-
-      data.frame(
-        model = model_name,
-        accept_rate = accept_rate,
-        actual_accept_rate = accepted / length(actual_default_tree),
-        cutoff = cutoff,
-        accepted = accepted,
-        accepted_good = accepted_good,
-        accepted_defaults = accepted_defaults,
-        bad_rate = bad_rate,
-        net_payoff = net_payoff
-      )
-    })
-  )
+                           acceptance_grid = seq(.50, .95, .05),
+                           good_loan_payoff = 1, bad_loan_cost = 5) {
+  credit_policy_curve(actual_default_tree, model_name, prob_of_default,
+                      acceptance_grid, good_loan_payoff, bad_loan_cost)
 }
 
 calibration_table <- function(model_name, prob_of_default, groups = 10) {
-  data.frame(
-    model = model_name,
-    application_row = as.integer(rownames(test)),
-    observed_default = actual_default_tree,
-    predicted_pd = prob_of_default
-  ) |>
-    arrange(model, predicted_pd, application_row) |>
-    group_by(model) |>
-    mutate(risk_decile = ntile(predicted_pd, groups)) |>
-    group_by(model, risk_decile) |>
-    summarize(
-      applications = n(),
-      average_predicted_pd = mean(predicted_pd),
-      observed_default_rate = mean(observed_default),
-      brier_score = mean((predicted_pd - observed_default)^2),
-      .groups = "drop"
-    )
+  credit_calibration_table(actual_default_tree, as.integer(rownames(test)),
+                           model_name, prob_of_default, groups)
 }
 
 constant_default_rate <- rep(mean(actual_default_tree), length(actual_default_tree))

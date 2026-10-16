@@ -25,7 +25,7 @@ for where to find the files created on your computer.
 | Table 1.4 | Default rate by home-ownership category. | [Code](chapter.qmd#L126) |
 | Figure 1.1 | Interest rate histogram. | [Code](chapter.qmd#L150) |
 | Figure 1.2 | Annual income dotplot. | [Code](chapter.qmd#L168) |
-| Figure 1.3 | Annual income without extreme values. | [Code](chapter.qmd#L197) |
+| Figure 1.3 | Annual income after excluding values above $1,000,000. | [Code](chapter.qmd#L197) |
 | Figure 1.4 | Sigmoid curve or logistic curve: age model. | [Code](chapter.qmd#L325) |
 | Table 1.5 | Coefficient and odds-ratio interpretation for `logi_multi`. | [Code](chapter.qmd#L444) |
 | Table 1.6 | AIC comparison across logistic model candidates. | [Code](chapter.qmd#L511) |
@@ -61,7 +61,7 @@ for where to find the files created on your computer.
 | Table 1.24 | Calibration by predicted-risk decile for the full and age-only models. | [Code](chapter.qmd#L1787) |
 | Figure 1.17 | Calibration by decile: full model in blue, age model in orange. | [Code](chapter.qmd#L1816) |
 | Table 1.25 | Brier score and Brier skill against a constant default-rate benchmark. | [Code](chapter.qmd#L1884) |
-| Table 1.26 | Cutoffs and error rates implied by two acceptance policies. | [Code](chapter.qmd#L1957) |
-| Figure 1.18 | Full model in blue, evaluated at two acceptance rates: 65% in black, 80% in red. | [Code](chapter.qmd#L2011) |
+| Table 1.26 | Cutoffs, sensitivity, and specificity under two acceptance policies. | [Code](chapter.qmd#L1957) |
+| Figure 1.18 | Full-model ROC curve (blue) with 65% (black) and 80% (red) acceptance policies. | [Code](chapter.qmd#L2011) |
 | Figure 1.19 | Random-score ROC benchmark. | [Code](chapter.qmd#L2180) |
 | Figure 1.20 | Perfect-score ROC benchmark. | [Code](chapter.qmd#L2229) |

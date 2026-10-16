@@ -42,18 +42,18 @@ No Chapter 1 session or generated output is required.
 | Table 2.13 | Direct overfitting diagnostic from the XGBoost learning curve. | [Code](chapter.qmd#L1481) |
 | Table 2.14 | Estimation, tuning, final evaluation and monitoring for XGBoost credit scoring. | [Code](chapter.qmd#L1524) |
 | Table 2.15 | XGBoost prediction range and test-set performance summary. | [Code](chapter.qmd#L1564) |
-| Figure 2.6 | XGBoost feature importance. | [Code](chapter.qmd#L1604) |
-| Figure 2.7 | Average absolute XGBoost contribution by feature. | [Code](chapter.qmd#L1644) |
+| Figure 2.6 | XGBoost feature importance by Gain. | [Code](chapter.qmd#L1604) |
+| Figure 2.7 | Average absolute contribution to the XGBoost log-odds score by feature. | [Code](chapter.qmd#L1644) |
 | Table 2.16 | Predicted PDs for selected test-set applicants. | [Code](chapter.qmd#L1692) |
 | Table 2.17 | Reconstructing John Doe's XGBoost score and predicted PD. | [Code](chapter.qmd#L1719) |
-| Table 2.18 | Largest local XGBoost contributions for John Doe. | [Code](chapter.qmd#L1751) |
+| Table 2.18 | Largest local contributions to John Doe's XGBoost log-odds score. | [Code](chapter.qmd#L1751) |
 | Figure 2.8 | Partial dependence of XGBoost predicted default probability. | [Code](chapter.qmd#L1794) |
-| Table 2.19 | Out-of-sample performance of the credit-scoring models. | [Code](chapter.qmd#L1922) |
-| Figure 2.9 | ROC curves: logistic regression, single tree, and XGBoost. | [Code](chapter.qmd#L1979) |
-| Table 2.20 | Probability checks within each model's own risk deciles. | [Code](chapter.qmd#L2016) |
-| Figure 2.10 | Calibration by decile: logistic regression and XGBoost. | [Code](chapter.qmd#L2047) |
-| Figure 2.11 | Bad rate by acceptance rate: logistic regression, single tree, and XGBoost. | [Code](chapter.qmd#L2078) |
-| Figure 2.12 | Net payoff by acceptance rate: logistic regression, single tree, and XGBoost. | [Code](chapter.qmd#L2107) |
-| Table 2.21 | Numerical check of the overall best net-payoff strategy. | [Code](chapter.qmd#L2160) |
-| Table 2.22 | Best net-payoff row by model. | [Code](chapter.qmd#L2191) |
-| Table 2.23 | Governance checklist for moving from a tree-based score to a credit policy. | [Code](chapter.qmd#L2217) |
+| Table 2.19 | Out-of-sample performance of the credit-scoring models. | [Code](chapter.qmd#L1911) |
+| Figure 2.9 | ROC curves: logistic regression, single tree, and XGBoost. | [Code](chapter.qmd#L1968) |
+| Table 2.20 | Probability checks within each model's own risk deciles. | [Code](chapter.qmd#L2005) |
+| Figure 2.10 | Calibration by decile: logistic regression and XGBoost. | [Code](chapter.qmd#L2036) |
+| Figure 2.11 | Bad rate by target acceptance rate: logistic regression, single tree, and XGBoost. | [Code](chapter.qmd#L2067) |
+| Figure 2.12 | Net payoff by target acceptance rate: logistic regression, single tree, and XGBoost. | [Code](chapter.qmd#L2096) |
+| Table 2.21 | Numerical check of the overall best net-payoff strategy. | [Code](chapter.qmd#L2149) |
+| Table 2.22 | Best net-payoff row by model. | [Code](chapter.qmd#L2180) |
+| Table 2.23 | Governance checklist for moving from a tree-based score to a credit policy. | [Code](chapter.qmd#L2206) |
