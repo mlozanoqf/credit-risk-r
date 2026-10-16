@@ -48,10 +48,10 @@ for where to find the files created on your computer.
 | Table 3.13 | Reading the one-input Merton sensitivity curves. | [Code](chapter.qmd#L1201) |
 | Figure 3.19 | A contour view of the risk-neutral probability of default as a function of equity value and equity volatility. | [Code](chapter.qmd#L1302) |
 | Figure 3.20 | The risk-neutral probability of default as a function of equity value and equity volatility: a three-dimensional view. | [Code](chapter.qmd#L1340) |
-| Table 3.14 | Capital-structure scenario summary under the Merton model. | [Code](chapter.qmd#L1456) |
-| Figure 3.21 | Initial capital-structure position and Merton risk-neutral PD. | [Code](chapter.qmd#L1478) |
-| Figure 3.22 | Debt reduction versus equity injection from the initial position. | [Code](chapter.qmd#L1499) |
-| Figure 3.23 | Alternative capital-structure position and Merton risk-neutral PD. | [Code](chapter.qmd#L1533) |
-| Figure 3.24 | Debt reduction versus equity injection from the alternative capital-structure position. | [Code](chapter.qmd#L1563) |
-| Figure 3.25 | Initial maturity-debt position and Merton risk-neutral PD. | [Code](chapter.qmd#L1626) |
-| Figure 3.26 | Higher promised debt payment versus longer maturity. | [Code](chapter.qmd#L1653) |
+| Table 3.14 | Capital-structure scenario summary under the Merton model. | [Code](chapter.qmd#L1462) |
+| Figure 3.21 | Initial capital-structure position and Merton risk-neutral PD. | [Code](chapter.qmd#L1484) |
+| Figure 3.22 | Lower promised debt versus higher equity value from the initial position. | [Code](chapter.qmd#L1505) |
+| Figure 3.23 | Alternative capital-structure position and Merton risk-neutral PD. | [Code](chapter.qmd#L1539) |
+| Figure 3.24 | Lower promised debt versus higher equity value from the alternative capital-structure position. | [Code](chapter.qmd#L1569) |
+| Figure 3.25 | Initial maturity-debt position and Merton risk-neutral PD. | [Code](chapter.qmd#L1632) |
+| Figure 3.26 | Higher promised debt payment versus longer maturity. | [Code](chapter.qmd#L1659) |

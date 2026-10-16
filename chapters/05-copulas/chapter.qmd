@@ -1114,6 +1114,44 @@ plot_fig_portfolio_loss_distribution +
     12, 5.5, 5.5))
 ```
 
+### Giving each borrower its own default threshold
+
+Three illustrative borrowers use different five-year PDs, exposures and recoveries.
+Analytical expected loss is USD 1,820,000; the simulated mean is checked against its
+Monte Carlo standard error. Borrower IDs preserve the column-to-exposure mapping.
+
+```{r heterogeneous-portfolio-inputs}
+borrowers <- data.frame(
+  borrower = c("A", "B", "C"),
+  pd = c(0.02, 0.05, 0.10),
+  ead = c(10, 20, 30) * 1e6,
+  recovery = c(0.40, 0.50, 0.60)
+)
+hetero_scores <- simulate_latent_credit(
+  n_sims = 100000, n_firms = nrow(borrowers),
+  rho = 0.2, seed = 130575
+)
+colnames(hetero_scores) <- borrowers$borrower
+thresholds <- setNames(qnorm(borrowers$pd), borrowers$borrower)
+hetero_defaults <- sweep(
+  hetero_scores, 2, thresholds[colnames(hetero_scores)], FUN = "<"
+)
+loss_if_default <- setNames(
+  borrowers$ead * (1 - borrowers$recovery), borrowers$borrower
+)
+hetero_losses <- as.vector(
+  hetero_defaults %*% loss_if_default[colnames(hetero_defaults)]
+)
+```
+
+```{r heterogeneous-portfolio-check}
+hetero_el <- sum(borrowers$pd * loss_if_default)
+hetero_mean <- mean(hetero_losses)
+hetero_mcse <- sd(hetero_losses) / sqrt(length(hetero_losses))
+c(analytical_EL = hetero_el, simulated_EL = hetero_mean,
+  simulation_SE = hetero_mcse)
+```
+
 ## 5.7 Concentration risk with different exposure weights
 
 ```{r step-065}

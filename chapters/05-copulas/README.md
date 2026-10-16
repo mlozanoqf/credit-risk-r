@@ -34,18 +34,18 @@ for where to find the files created on your computer.
 | Figure 5.7 | Distribution of the number of defaults by year 5 under different copula correlations. | [Code](chapter.qmd#L937) |
 | Table 5.11 | Portfolio loss summary for a homogeneous ten-firm portfolio. | [Code](chapter.qmd#L1071) |
 | Figure 5.8 | Portfolio loss distribution under different copula correlations. | [Code](chapter.qmd#L1101) |
-| Table 5.12 | Concentration risk with the same total exposure, PD, recovery, and copula correlation. | [Code](chapter.qmd#L1188) |
-| Figure 5.9 | Portfolio loss distributions with the same defaults and different exposure weights. | [Code](chapter.qmd#L1251) |
-| Table 5.13 | Two firms affected by the same t-copula scale draw. | [Code](chapter.qmd#L1428) |
-| Table 5.14 | Default clustering under Gaussian and t-copulas. | [Code](chapter.qmd#L1442) |
-| Table 5.15 | Portfolio loss measures under Gaussian and t-copulas. | [Code](chapter.qmd#L1453) |
-| Figure 5.10 | Default-count distribution under Gaussian and t-copulas. | [Code](chapter.qmd#L1483) |
-| Table 5.16 | Inputs for the Vasicek-style Credit VaR approximation. | [Code](chapter.qmd#L1597) |
-| Table 5.17 | Mapping the Credit VaR notation to the R implementation. | [Code](chapter.qmd#L1640) |
-| Table 5.18 | Numerical substitution for the 99.9% Credit VaR calculation. | [Code](chapter.qmd#L1686) |
-| Table 5.19 | Gaussian Vasicek Credit VaR, expected loss, capital, and expected shortfall. | [Code](chapter.qmd#L1741) |
-| Table 5.20 | The 99.9% Gaussian Credit VaR calculation. | [Code](chapter.qmd#L1771) |
-| Figure 5.11 | Systematic factor and conditional portfolio loss. | [Code](chapter.qmd#L1792) |
-| Table 5.21 | Credit VaR model risk under Gaussian and t-copula assumptions. | [Code](chapter.qmd#L1919) |
-| Figure 5.12 | Loss-tail survival probabilities under Gaussian and t-copulas. | [Code](chapter.qmd#L1965) |
-| Table 5.22 | Monte Carlo precision of the 99.9% expected-shortfall comparison, in USD millions. | [Code](chapter.qmd#L2006) |
+| Table 5.12 | Concentration risk with the same total exposure, PD, recovery, and copula correlation. | [Code](chapter.qmd#L1226) |
+| Figure 5.9 | Portfolio loss distributions with the same defaults and different exposure weights. | [Code](chapter.qmd#L1289) |
+| Table 5.13 | Two firms affected by the same t-copula scale draw. | [Code](chapter.qmd#L1466) |
+| Table 5.14 | Default clustering under Gaussian and t-copulas. | [Code](chapter.qmd#L1480) |
+| Table 5.15 | Portfolio loss measures under Gaussian and t-copulas. | [Code](chapter.qmd#L1491) |
+| Figure 5.10 | Default-count distribution under Gaussian and t-copulas. | [Code](chapter.qmd#L1521) |
+| Table 5.16 | Inputs for the Vasicek-style Credit VaR approximation. | [Code](chapter.qmd#L1635) |
+| Table 5.17 | Mapping the Credit VaR notation to the R implementation. | [Code](chapter.qmd#L1678) |
+| Table 5.18 | Numerical substitution for the 99.9% Credit VaR calculation. | [Code](chapter.qmd#L1724) |
+| Table 5.19 | Gaussian Vasicek Credit VaR, expected loss, capital, and expected shortfall. | [Code](chapter.qmd#L1779) |
+| Table 5.20 | The 99.9% Gaussian Credit VaR calculation. | [Code](chapter.qmd#L1809) |
+| Figure 5.11 | Systematic factor and conditional portfolio loss. | [Code](chapter.qmd#L1830) |
+| Table 5.21 | Credit VaR model risk under Gaussian and t-copula assumptions. | [Code](chapter.qmd#L1957) |
+| Figure 5.12 | Loss-tail survival probabilities under Gaussian and t-copulas. | [Code](chapter.qmd#L2003) |
+| Table 5.22 | Monte Carlo precision of the 99.9% expected-shortfall comparison, in USD millions. | [Code](chapter.qmd#L2044) |

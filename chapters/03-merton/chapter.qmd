@@ -1410,7 +1410,7 @@ capital_structure_summary <- data.frame(
   Scenario = c(
     "1. Initial Hull position",
     "2. Lower-equity/lower-debt position",
-    "3. Liquidity and maturity choice"
+    "3. Debt and maturity inputs"
   ),
   `Initial position` = c(
     paste0("$E_0 = ", fmt_num(E0, 0), "$, $D = ", fmt_num(D, 0), "$, $T = ", fmt_num(TT, 0), "$"),
@@ -1422,7 +1422,7 @@ capital_structure_summary <- data.frame(
     fmt_pct(pd_scenario_2_initial, 2),
     fmt_pct(pd_scenario_3_initial, 2)
   ),
-  `Action A` = c(
+  `Input A` = c(
     paste0("Reduce $D$ to ", fmt_num(D - 2, 0)),
     paste0("Reduce $D$ to ", fmt_num(scenario2_D - 1, 0)),
     paste0("Raise $D$ to ", fmt_num(scenario3_D + 2, 0))
@@ -1432,7 +1432,7 @@ capital_structure_summary <- data.frame(
     fmt_pct(scenario2_reduce_D, 2),
     fmt_pct(scenario3_more_debt, 2)
   ),
-  `Action B` = c(
+  `Input B` = c(
     paste0("Raise $E_0$ to ", fmt_num(E0 + 2, 0)),
     paste0("Raise $E_0$ to ", fmt_num(scenario2_E0 + 1, 0)),
     paste0("Extend $T$ to ", fmt_num(scenario3_T + 0.5, 1))
@@ -1443,15 +1443,21 @@ capital_structure_summary <- data.frame(
     fmt_pct(scenario3_more_time, 2)
   ),
   `Lower-PD alternative` = c(
-    "Action B, equity injection",
-    "Action A, debt reduction",
-    "Action A, higher promised payment"
+    "Input B, higher equity value",
+    "Input A, lower promised payment",
+    "Input A, higher promised payment"
   ),
   check.names = FALSE
 )
 ```
 
 ### Table 3.14 {#result-table-3-14}
+
+These are recalibrated input configurations. A change in market equity value is
+not automatically the cash raised in an equity issue, and reducing promised
+debt need not cost its face amount today. The third comparison also changes
+the default horizon from 1.5 to 2 years. Comparing actual financing transactions
+requires their dated cash flows, costs and effects on the remaining inputs.
 
 ```{r table-3-14}
 companion_kable(
@@ -1499,7 +1505,7 @@ plot_capital_structure(
 ```{r figure-3-22}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.22. Debt reduction versus equity injection from the initial position."
+#| fig-cap: "Figure 3.22. Lower promised debt versus higher equity value from the initial position."
 plot_capital_structure(
   curve_data = equity_curve_data,
   color_values = colors,
@@ -1563,7 +1569,7 @@ plot_capital_structure(
 ```{r figure-3-24}
 #| fig-width: 5.5
 #| fig-height: 4
-#| fig-cap: "Figure 3.24. Debt reduction versus equity injection from the alternative capital-structure position."
+#| fig-cap: "Figure 3.24. Lower promised debt versus higher equity value from the alternative capital-structure position."
 plot_capital_structure(
   curve_data = scenario2_curve_data,
   color_values = scenario2_colors,

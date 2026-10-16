@@ -1215,6 +1215,25 @@ xgb_test_logloss_estimated <- xgb_estimation_log_loss(
 )
 ```
 
+### Scoring an incoming application
+
+The fixed training encoding is reused for one held-out applicant without the outcome.
+Both individual and batch predictions must agree. Unknown categories require review.
+
+```{r xgb-incoming-applicant}
+source("chapters/02-tree-based/helpers/new-applicants.R")
+encode_applicants <- make_xgb_encoder(
+  train, xgb_formula, colnames(xgb_train_matrix)
+)
+incoming <- test[1, all.vars(xgb_formula), drop = FALSE]
+incoming_matrix <- encode_applicants(incoming)
+incoming_pd <- as.numeric(predict(
+  xgb_model, xgboost::xgb.DMatrix(incoming_matrix)
+))
+c(individual_PD = incoming_pd, batch_PD = pred_xgb[1])
+stopifnot(isTRUE(all.equal(incoming_pd, unname(pred_xgb[1]))))
+```
+
 ### Table 2.12 {#result-table-2-12}
 
 ```{r table-2-12}

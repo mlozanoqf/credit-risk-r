@@ -426,6 +426,13 @@ scenario_lookup <- tibble::tibble(
   )
 )
 
+source("chapters/06-climate-credit-risk/helpers/validation.R")
+climate_years <- 2022:2030
+climate_scenarios <- c("DIRE", "HWTP", "SWUC")
+validate_climate_inputs(
+  ngfs_raw, portfolio, climate_scenarios, climate_years, metric_names
+)
+
 climate_credit <- ngfs_raw |>
   tidyr::separate(
     variable,
@@ -462,6 +469,20 @@ climate_credit <- ngfs_raw |>
     wacc_adjustment = wacc_adjustment / 100,
     lgd = 1 - recovery
   )
+```
+
+### Verifying complete portfolio coverage
+
+Every requested scenario-year must retain every sector and the full exposure.
+Missing mappings, duplicate inputs and invalid PDs stop the calculation for review.
+
+```{r climate-joined-coverage}
+climate_coverage <- validate_climate_portfolio(
+  climate_credit, portfolio, climate_scenarios, climate_years
+)
+c(scenario_year_groups = nrow(climate_coverage),
+  minimum_EAD = min(climate_coverage$ead),
+  maximum_EAD = max(climate_coverage$ead))
 ```
 
 ### Table 6.8 {#result-table-6-8}
