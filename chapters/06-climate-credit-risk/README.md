@@ -49,9 +49,9 @@ It leaves the frozen files in `data/climate` unchanged.
 | Figure 6.2 | Present value of five-year portfolio expected loss with and without CLIMACRED climate adjustments. | [Code](chapter.qmd#L786) |
 | Figure 6.3 | Sector contributions to the climate-related change in five-year discounted expected loss. | [Code](chapter.qmd#L811) |
 | Figure 6.4 | Climate PD adjustments by scenario and sector in 2030. | [Code](chapter.qmd#L848) |
-| Figure 6.5 | Baseline and climate-adjusted PD paths under Highway to Paris. | [Code](chapter.qmd#L906) |
-| Table 6.12 | Largest 2030 CLIMACRED corporate bond spread adjustments by scenario. | [Code](chapter.qmd#L940) |
-| Figure 6.6 | CLIMACRED bond spread adjustments compared with changes in the PD x LGD benchmark. | [Code](chapter.qmd#L986) |
-| Table 6.13 | One-year simulated portfolio loss in 2030 under Highway to Paris. | [Code](chapter.qmd#L1105) |
-| Table 6.14 | Credit scores and default cutoffs for two sectors in one simulated row. | [Code](chapter.qmd#L1144) |
-| Figure 6.7 | Baseline and climate-adjusted one-year portfolio loss distributions in 2030 under Highway to Paris. | [Code](chapter.qmd#L1164) |
+| Figure 6.5 | Baseline and climate-adjusted PD paths under Highway to Paris. | [Code](chapter.qmd#L907) |
+| Table 6.12 | Largest 2030 CLIMACRED corporate bond spread adjustments by scenario. | [Code](chapter.qmd#L941) |
+| Figure 6.6 | CLIMACRED bond spread adjustments compared with changes in the PD x LGD benchmark. | [Code](chapter.qmd#L987) |
+| Table 6.13 | One-year simulated portfolio loss in 2030 under Highway to Paris. | [Code](chapter.qmd#L1106) |
+| Table 6.14 | Credit scores and default cutoffs for two sectors in one simulated row. | [Code](chapter.qmd#L1145) |
+| Figure 6.7 | Baseline and climate-adjusted one-year portfolio loss distributions in 2030 under Highway to Paris. | [Code](chapter.qmd#L1165) |

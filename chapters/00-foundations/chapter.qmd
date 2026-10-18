@@ -236,8 +236,8 @@ simulation_check <- data.frame(
 )
 knitr::kable(data.frame(
   Dependence = simulation_check$dependence,
-  `Exact mean ($)` = fmt_num(simulation_check$exact_mean_loss, 2),
-  `Simulated mean ($)` = fmt_num(simulation_check$simulated_mean_loss, 2),
+  `Exact mean loss (\\$)` = fmt_num(simulation_check$exact_mean_loss, 2),
+  `Simulated mean loss (\\$)` = fmt_num(simulation_check$simulated_mean_loss, 2),
   `Exact joint PD` = fmt_pct(simulation_check$exact_joint_pd, 2),
   `Simulated joint PD` = fmt_pct(simulation_check$simulated_joint_pd, 2),
   check.names = FALSE
