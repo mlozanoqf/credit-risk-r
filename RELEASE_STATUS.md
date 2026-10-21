@@ -5,7 +5,7 @@
 The repository contains the complete frozen credit-scoring dataset for
 Chapters 1 and 2. See [provenance](data/credit-scoring/PROVENANCE.md).
 The book and Python companion use the same RDS file. All six frozen inputs
-match their recorded hashes. The repository remains private until publication.
+match their recorded hashes. The companion repository is publicly accessible on GitHub.
 
 ## Verified results
 

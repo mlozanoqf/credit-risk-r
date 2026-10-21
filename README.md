@@ -2,18 +2,17 @@
 
 Computational companion by Martín Lozano. Use it alongside the book to reproduce
 and extend its calculations, tables and figures, one chapter at a time.
-You will generate a local HTML report containing code and results, plus separate
+The chapter runner generates a local HTML report containing code and results, plus separate
 figure and table files. This repository does not build the publisher PDF.
 
-**Pre-publication access:** this repository is private while the book is being
-prepared. Public access is planned for publication, at the same URL.
+**Public access:** this repository is freely accessible on GitHub.
 The complete frozen credit-scoring data are included. See [release status](RELEASE_STATUS.md)
 and the [provenance note](data/credit-scoring/PROVENANCE.md).
 
 ## First time: prepare your computer
 
-The recommended route uses RStudio. Git, a GitHub account after public release,
-LaTeX and the publisher's template are not required.
+The recommended route uses RStudio. Once the complete ZIP is downloaded, running
+the calculations requires neither Git nor a GitHub account, LaTeX or the publisher's template.
 
 1. On this GitHub page, choose **Code > Download ZIP**. Extract the entire ZIP
    into a folder on your computer. Work in the extracted folder, not inside the
@@ -144,7 +143,8 @@ records before cleaning. See the [dictionary](data/credit-scoring/README.md)
 and [source note](data/credit-scoring/PROVENANCE.md). Foundations and Chapters
 3-6 have separate inputs and run independently. See [all data notes](data/README.md).
 
-The instructor manual uses this complete repository together with a separately
+The *Instructor's Manual* is available through the publisher's password-protected
+Instructor Hub, reserved for instructors. It uses this complete repository together with a separately
 distributed, restricted instructor code package. Solutions reuse the book's
 frozen inputs and shared R functions and add exercise-specific calculations.
 The instructor package README identifies the compatible companion revision and
