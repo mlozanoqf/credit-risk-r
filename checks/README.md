@@ -8,7 +8,8 @@ tests and `Rscript checks/test-download.R` for offline download-protection tests
 
 `book-results.csv` records the 211 numbered results checked against book revision
 `d7a08d03801b73d9801b14eaffe095563c0e47a0`, with caption-only updates
-checked against the local publication manuscript on 16 October 2026. Numbering
+checked against the compiled publication manuscript on 20 October 2026, including
+14 table captions with unit clarifications. Numbering
 and result identifiers are unchanged. Update the index and this reference
 together after checking later changes in book numbering.
 

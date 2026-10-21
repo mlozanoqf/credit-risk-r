@@ -377,7 +377,7 @@ ngfs_manifest |>
 ngfs_raw |>
   select(model, scenario, region, variable, year, value) |>
   head(8) |>
-  companion_kable(caption = "First rows of the raw global CLIMACRED file.")
+  companion_kable(caption = "First rows of the raw global CLIMACRED file. All displayed values are PD adjustments in percentage points.")
 ```
 
 ### Table 6.7 {#result-table-6-7}

@@ -39,7 +39,7 @@ It leaves the frozen files in `data/climate` unchanged.
 | Table 6.3 | CLIMACRED variables used in the chapter. | [Code](chapter.qmd#L152) |
 | Table 6.4 | Sector portfolio used for the climate credit-risk application. | [Code](chapter.qmd#L342) |
 | Table 6.5 | Raw NGFS/IIASA files used in the chapter. | [Code](chapter.qmd#L363) |
-| Table 6.6 | First rows of the raw global CLIMACRED file. | [Code](chapter.qmd#L376) |
+| Table 6.6 | First rows of the raw global CLIMACRED file. All displayed values are PD adjustments in percentage points. | [Code](chapter.qmd#L376) |
 | Table 6.7 | Data provenance for the climate credit-risk workflow. | [Code](chapter.qmd#L385) |
 | Table 6.8 | Cleaned CLIMACRED credit variables for Highway to Paris in 2030. | [Code](chapter.qmd#L490) |
 | Figure 6.1 | Maximum regional physical-risk PD adjustments over 2024-2030 in selected CLIMACRED DAPS runs. | [Code](chapter.qmd#L591) |

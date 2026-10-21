@@ -6,6 +6,9 @@ The chapter runner generates a local HTML report containing code and results, pl
 figure and table files. This repository does not build the publisher PDF.
 
 **Public access:** this repository is freely accessible on GitHub.
+Repository: <https://github.com/mlozanoqf/credit-risk-r>.
+For checked Python adaptations, see <https://github.com/mlozanoqf/credit-risk-py>;
+the R implementation remains the book's numerical reference.
 The complete frozen credit-scoring data are included. See [release status](RELEASE_STATUS.md)
 and the [provenance note](data/credit-scoring/PROVENANCE.md).
 
@@ -147,6 +150,7 @@ The *Instructor's Manual* is available through the publisher's password-protecte
 Instructor Hub, reserved for instructors. It uses this complete repository together with a separately
 distributed, restricted instructor code package. Solutions reuse the book's
 frozen inputs and shared R functions and add exercise-specific calculations.
+Download `instructor-code.zip` alongside the manual from Instructor Hub.
 The instructor package README identifies the compatible companion revision and
 its own runner. `start_chapter()` and `run.R` here generate book results, not
 instructor solutions. Access to the instructor package is separate.

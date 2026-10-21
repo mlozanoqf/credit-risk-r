@@ -83,7 +83,7 @@ merton_bridge_table <- data.frame(
   )
 )
 
-companion_kable(merton_bridge_table, caption = "Merton quantities carried into the credit-spread chapter.")
+companion_kable(merton_bridge_table, caption = "Merton quantities carried into the credit-spread chapter. Debt amounts retain Chapter 3's common monetary unit (MU).")
 ```
 
 ## 4.1 Default timing in discrete time
@@ -181,7 +181,7 @@ zero_table <- data.frame(
   )
 )
 
-companion_kable(zero_table, caption = "Risk-free and risky zero-coupon valuation.")
+companion_kable(zero_table, caption = "Risk-free and risky zero-coupon valuation. Prices are per 100 of face value.")
 ```
 
 ## 4.3 A risky coupon bond
@@ -236,7 +236,7 @@ coupon_table <- data.frame(
   )
 )
 
-companion_kable(coupon_table, caption = "Risk-free and risky coupon bond valuation.")
+companion_kable(coupon_table, caption = "Risk-free and risky coupon bond valuation. Prices are per 100 of face value.")
 ```
 
 ```{r step-019}
@@ -794,7 +794,7 @@ hull_mtm_table <- data.frame(
 ```{r table-4-16}
 companion_kable(
   hull_mtm_table,
-  caption = "Mark-to-market value of an existing CDS."
+  caption = "Mark-to-market value of an existing CDS. Present values are per unit of notional."
 )
 ```
 
@@ -1155,7 +1155,7 @@ companion_kable(data.frame(
   `Year 1 PD` = vapply(rv_results, function(x) fmt_pct(x$h[1], 3), character(1)),
   `Year 8 PD` = vapply(rv_results, function(x) fmt_pct(x$h[2], 3), character(1)),
   `Model price` = vapply(rv_results, function(x) fmt_price(x$model_price, 4), character(1)),
-  check.names = FALSE), caption = "Issuer-specific pricing curves and model values for the bonds excluded from calibration.")
+  check.names = FALSE), caption = "Issuer-specific pricing curves and model values for the bonds excluded from calibration. Model clean prices are per 100 of principal.")
 ```
 
 ## 4.8 Which bond offers the stronger relative value?
@@ -1186,7 +1186,7 @@ companion_kable(data.frame(
   Verizon = c(fmt_price(rv_comparison$mark[2], 4), fmt_price(rv_comparison$model_price[2], 4),
     fmt_price(rv_comparison$price_gap[2], 4), fmt_pct(rv_comparison$market_yield[2], 4),
     fmt_pct(rv_comparison$model_yield[2], 4), fmt_num(rv_comparison$residual_bp[2], 2))
-), caption = "Price and yield comparisons using the same promised payments for each bond.")
+), caption = "Price and yield comparisons using the same promised payments for each bond. Clean prices and price differences are per 100 of principal.")
 ```
 
 ```{r step-079}
@@ -1424,7 +1424,7 @@ companion_kable(data.frame(
   check.names = FALSE
 ), caption = paste0("Recovery sensitivity for the Brazilian bond. Fitted PDs hold price at ",
                     fmt_price(brazil_issue_price, 3), "; the last column holds annual PD at ",
-                    fmt_pct(brazil_h, 4), "."),
+                    fmt_pct(brazil_h, 4), ". All prices are per 100 of principal."),
 row.names = FALSE)
 ```
 

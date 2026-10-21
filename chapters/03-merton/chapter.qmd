@@ -88,7 +88,7 @@ companion_kable(
       fmt_pct(pd, 4)
     )
   ),
-  caption = "Estimated Merton asset value, asset volatility, and risk-neutral default probability.",
+  caption = "Estimated Merton asset value (MU), annualized asset volatility, and risk-neutral default probability.",
   row.names = FALSE
 )
 ```
@@ -483,7 +483,7 @@ debt_summary <- data.frame(
 
 companion_kable(
   debt_summary,
-  caption = "Debt measures implied by the fitted Merton model.",
+  caption = "Debt measures implied by the fitted Merton model. Monetary values are in MU.",
   row.names = FALSE
 )
 ```
@@ -522,7 +522,7 @@ spread_summary <- data.frame(
 
 companion_kable(
   spread_summary,
-  caption = "Merton-implied bond yield and credit spread.",
+  caption = "Merton-implied bond yield and credit spread. Debt values are in MU; rates and yields are annual.",
   row.names = FALSE
 )
 ```
@@ -1054,7 +1054,7 @@ companion_kable(
       fmt_pct(pd1, 4)
     )
   ),
-  caption = "Original Hull/Merton input position for the sensitivity analysis.",
+  caption = "Original Hull/Merton input position for the sensitivity analysis. Monetary values are in MU; maturity is in years.",
   row.names = FALSE
 )
 ```
@@ -1201,7 +1201,7 @@ sensitivity_summary_table <- data.frame(
 ```{r table-3-13}
 companion_kable(
   sensitivity_summary_table,
-  caption = "Reading the one-input Merton sensitivity curves.",
+  caption = "Reading the one-input Merton sensitivity curves. Equity and debt amounts are in MU.",
   escape = FALSE,
   row.names = FALSE
 )
@@ -1462,7 +1462,7 @@ requires their dated cash flows, costs and effects on the remaining inputs.
 ```{r table-3-14}
 companion_kable(
   capital_structure_summary,
-  caption = "Capital-structure scenario summary under the Merton model.",
+  caption = "Capital-structure scenario summary under the Merton model. Equity and debt are in MU; maturity is in years.",
   escape = FALSE,
   row.names = FALSE
 )
